@@ -100,27 +100,39 @@ inline PortraitPauseLayout PortraitPause(float aspect) {
   return {width, height, std::min(22.f, (width - 24) / 7.f), height / 2 - 27,
           list_scale, height / 2 - 59 - 27.625f * list_scale};
 }
+inline constexpr float kPortraitLibraryContentTop = 148;
+inline constexpr float kPortraitLibraryGap = 5;
+inline constexpr float kPortraitLibraryInset = 10;
+inline constexpr float kPortraitLibraryButtonHeight = 28;
+inline constexpr float kPortraitLibraryFooterZ = -203;
+inline constexpr float kPortraitLibraryFooterTop = kPortraitLibraryFooterZ + kPortraitLibraryButtonHeight / 2;
+
+inline float PortraitLibraryWidth(float aspect) {
+  return PortraitSplash(aspect).width * .92f;
+}
+
 inline constexpr float kPortraitSongRowHeight = 55;
 inline constexpr float kPortraitSongRowStep = 60;
-inline constexpr float kPortraitStoreMenuRowZ = 110;
-inline constexpr float kPortraitStoreBrowserRowZ = 108;
 inline constexpr float kPortraitSongArrowScale = .9f;
 inline constexpr float kPortraitSongArrowInset = 22;
 
 struct PortraitSongsLayout {
   float width, list_scale;
-  float tabs_z = kPortraitHubTitleCenter, tools_z = 133, list_z = 92;
-  float card_z = -158, card_height = 52;
-  int rows = 7;
+  static constexpr float tabs_z = kPortraitHubTitleCenter;
+  static constexpr float card_height = 52;
+  static constexpr float card_z = kPortraitLibraryFooterTop + 3 + card_height / 2;
+  static constexpr float list_top = kPortraitLibraryContentTop - kPortraitLibraryButtonHeight - 15;
+  static constexpr float list_bottom = card_z + card_height / 2 + kPortraitLibraryGap;
+
+  float FirstRowZ(float top) const { return top - kPortraitSongRowHeight / 2 * list_scale; }
+  int Rows(float top, float bottom, float step = kPortraitSongRowStep) const {
+    return 1 + int((top - bottom - kPortraitSongRowHeight * list_scale) / (step * list_scale));
+  }
 };
 
 inline PortraitSongsLayout PortraitSongs(float aspect) {
-  const float width = PortraitSplash(aspect).width * .92f;
-  PortraitSongsLayout layout{width, width / 420.f};
-  layout.rows = std::min(7, 1 + int((layout.list_z - (layout.card_z + layout.card_height / 2 + 14) -
-                                   kPortraitSongRowHeight / 2 * layout.list_scale) /
-                                   (kPortraitSongRowStep * layout.list_scale)));
-  return layout;
+  const float width = PortraitLibraryWidth(aspect);
+  return {width, width / 420.f};
 }
 
 struct PortraitStoreOfferLayout {
@@ -135,7 +147,7 @@ struct PortraitStoreOfferLayout {
 };
 
 inline PortraitStoreOfferLayout PortraitStoreOffer(float aspect) {
-  const float width = PortraitSongs(aspect).width;
+  const float width = PortraitLibraryWidth(aspect);
   return {width, std::min(width * .74f, 142.f)};
 }
 
@@ -163,34 +175,38 @@ struct PortraitStoreDialogLayout {
 };
 
 inline PortraitStoreDialogLayout PortraitStoreDialog(float aspect) {
-  return {std::min(PortraitSongs(aspect).width, 260.f)};
+  return {std::min(PortraitLibraryWidth(aspect), 260.f)};
 }
 
 struct PortraitMessagesLayout {
   float width;
-  float tabs_z = kPortraitHubTitleCenter, list_z = 130, row_step = 48, row_height = 42;
+  static constexpr float tabs_z = kPortraitHubTitleCenter, row_height = 42;
+  static constexpr float list_z = kPortraitLibraryContentTop - row_height / 2;
+  static constexpr float row_step = row_height + kPortraitLibraryGap;
   float icon_size = 28, icon_inset = 22, text_inset = 44;
-  float detail_top = 101, detail_bottom = -179;
-  float subject_top = 90, subject_height = 32;
-  float body_top = 52, body_height = 221;
+  static constexpr float detail_top = kPortraitLibraryContentTop - row_step;
+  static constexpr float detail_bottom = kPortraitLibraryFooterTop + 2 * kPortraitLibraryGap;
+  static constexpr float subject_top = detail_top - kPortraitLibraryInset, subject_height = 32;
+  static constexpr float body_top = subject_top - subject_height - 6;
+  static constexpr float body_height = body_top - detail_bottom - kPortraitLibraryInset;
   int rows = 1;
 };
 
 inline PortraitMessagesLayout PortraitMessages(float aspect) {
-  return {PortraitSongs(aspect).width};
+  return {PortraitLibraryWidth(aspect)};
 }
 
 struct PortraitRecommendationsLayout {
-  float width, art_size, navigation_size;
-  float tabs_z = kPortraitHubTitleCenter, carousel_z = 104;
-  static constexpr float inset = 10, hero_top = 164;
+  float width, art_size, navigation_size, carousel_z;
+  static constexpr float tabs_z = kPortraitHubTitleCenter;
+  static constexpr float inset = kPortraitLibraryInset, hero_top = kPortraitLibraryContentTop;
   static constexpr float type_height = 12, title_height = 18, artist_height = 16;
   static constexpr float info_height = 14, reason_height = 43;
-  static constexpr float position_top = 154, position_height = 12;
+  static constexpr float position_top = hero_top - inset, position_height = 12;
   float leaderboard_title_top = -125, leaderboard_z = -148, leaderboard_step = 17;
   float TypeTop() const { return carousel_z - art_size / 2 - 7; }
   float HeroBottom() const { return TypeTop() - type_height - 6; }
-  float DetailsTop() const { return HeroBottom() - 4; }
+  float DetailsTop() const { return HeroBottom() - kPortraitLibraryGap; }
   float TitleTop() const { return DetailsTop() - inset; }
   float ArtistTop() const { return TitleTop() - title_height - 3; }
   float InfoTop() const { return ArtistTop() - artist_height - 2; }
@@ -203,8 +219,9 @@ struct PortraitRecommendationsLayout {
 };
 
 inline PortraitRecommendationsLayout PortraitRecommendations(float aspect) {
-  const float width = PortraitSongs(aspect).width;
-  return {width, std::min(width * .48f, 112.f), std::min(width * .21f, 36.f)};
+  const float width = PortraitLibraryWidth(aspect);
+  const float art_size = std::min(width * .48f, 112.f);
+  return {width, art_size, std::min(width * .21f, 36.f), kPortraitLibraryContentTop - 8 - art_size / 2};
 }
 
 struct PortraitPowerupsLayout {
@@ -288,11 +305,19 @@ inline PortraitCalibrationAction PortraitHubArrowTarget(const PortraitSongsLayou
           layout.tabs_z, 68, 56};
 }
 
+inline PortraitCalibrationAction PortraitLibraryButton(float width, size_t index, size_t count, float z) {
+  const float cell = (width - kPortraitLibraryGap * (count - 1)) / count;
+  return {(float(index) - float(count - 1) / 2) * (cell + kPortraitLibraryGap),
+          z, cell, kPortraitLibraryButtonHeight};
+}
+
+inline PortraitCalibrationAction PortraitSongTool(float aspect, bool search) {
+  return PortraitLibraryButton(PortraitLibraryWidth(aspect), search ? 1 : 0, 2,
+                               kPortraitLibraryContentTop - kPortraitLibraryButtonHeight / 2);
+}
+
 inline PortraitCalibrationAction PortraitLibraryFooter(float aspect, size_t index, size_t count) {
-  const auto layout = PortraitSongs(aspect);
-  constexpr float gap = 5;
-  const float width = (layout.width - gap * (count - 1)) / count;
-  return {(float(index) - float(count - 1) / 2) * (width + gap), -204, width, 30};
+  return PortraitLibraryButton(PortraitLibraryWidth(aspect), index, count, kPortraitLibraryFooterZ);
 }
 
 inline const char* PortraitRecommendationFooterSurface(size_t index) {
@@ -361,16 +386,25 @@ inline constexpr std::array<std::string_view, 5> kPortraitLibraryScreens{
     "song_select_screen", "store_menu_screen", "store_browser_screen",
     "inbox_screen", "recommendation_screen"};
 
+inline bool PortraitLibraryScreen(std::string_view screen) {
+  return std::find(kPortraitLibraryScreens.begin(), kPortraitLibraryScreens.end(), screen) !=
+      kPortraitLibraryScreens.end();
+}
+
 inline bool PortraitLibraryTransition(std::string_view screen) {
   if (!screen.starts_with("trans_")) return false;
   screen.remove_prefix(6);
   for (const auto source : kPortraitLibraryScreens) {
     if (!screen.starts_with(source) || screen.size() <= source.size() || screen[source.size()] != '_') continue;
     const auto destination = screen.substr(source.size() + 1);
-    return std::find(kPortraitLibraryScreens.begin(), kPortraitLibraryScreens.end(), destination) !=
-        kPortraitLibraryScreens.end();
+    return PortraitLibraryScreen(destination);
   }
   return false;
+}
+
+inline bool PortraitLibraryBackgroundTitle(std::string_view name) {
+  return name == "main_Home.lbl" || name == "main_my_songs.lbl" || name == "main_store.lbl" ||
+      name == "main_inbox.lbl" || name == "main_new_msg.lbl" || name == "offline_Mysongs.lbl";
 }
 
 inline std::string_view PortraitLibraryPanelScreen(std::string_view panel, bool store_browser = false) {

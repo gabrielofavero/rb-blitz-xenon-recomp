@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/input_font_scene.h"
 #include "ui/milo_object_boundaries.h"
+#include "messages/messages_api.h"
 
 #include <array>
 #include <algorithm>
@@ -2012,7 +2013,7 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
   PortraitPose(*edited.Find("songlist.grp"), 1, 0, 0);
   PortraitPose(*edited.Find("songselect.grp"), 1, 0, 0);
   PortraitPose(*edited.Find("right_col.grp"), 1, 0, 0);
-  PortraitPose(*edited.Find("songs.lst"), layout.list_scale, 0, layout.list_z, "songlist.grp");
+  PortraitPose(*edited.Find("songs.lst"), layout.list_scale, 0, layout.FirstRowZ(layout.list_top), "songlist.grp");
   RenameSceneString(edited.Find("songs.lst")->data, "../resource/lists/list_mysongs.milo",
                     "../resource/lists/portrait_mysongs.milo");
   const std::vector<std::string> landscape_art{"side_panel.mesh", "side_neon.mesh", "side_neon_inner.mesh",
@@ -2033,10 +2034,10 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
   RenameSceneString(title.data, "leaderboard_song_artistname", "");
   edited.objects.push_back(std::move(title));
   for (const auto& [name, z, size] : {
-      std::tuple{"portrait_song_title.lbl", -141.f, 12.f},
-      std::tuple{"artist.lbl", -154.f, 10.f},
-      std::tuple{"album.lbl", -166.f, 9.f},
-      std::tuple{"genre_year.lbl", -178.f, 9.f}}) {
+      std::tuple{"portrait_song_title.lbl", layout.card_z + 17, 12.f},
+      std::tuple{"artist.lbl", layout.card_z + 4, 10.f},
+      std::tuple{"album.lbl", layout.card_z - 8, 9.f},
+      std::tuple{"genre_year.lbl", layout.card_z - 20, 9.f}}) {
     auto* label = edited.Find(name);
     PortraitPose(*label, 1, left + 48, z);
     PortraitText(*label, size, layout.width - 60, 0x21);
@@ -2060,20 +2061,22 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
   edited.Before("artist.lbl", {"portrait_song_title.lbl"});
   PortraitSurface(edited, buttons, "portrait_song_card", layout.width, layout.card_height,
                   0, layout.card_z, "portrait_song_title.lbl");
+  PortraitSurface(edited, buttons, "portrait_song_viewport", layout.width, layout.list_top - layout.list_bottom,
+                  0, (layout.list_top + layout.list_bottom) / 2, {});
   auto* sort = edited.Find("sorting.lbl");
-  PortraitPose(*sort, 1, -layout.width / 4 - 2, layout.tools_z);
-  PortraitText(*sort, 12, layout.width / 2 - 8);
+  const auto sort_slot = ui::PortraitSongTool(aspect, false);
+  PortraitPose(*sort, 1, sort_slot.x, sort_slot.z);
+  PortraitText(*sort, 12, sort_slot.width - 8);
   auto search = *sort; search.name = "portrait_search.lbl";
   RenameSceneString(search.data, "song_sort_str", "search");
   RenameSceneString(search.data, "../resource/fonts/buttons.milo",
                     "../resource/fonts/inline_help_icons.milo");
-  PortraitPose(search, 1, layout.width / 4 + 2, layout.tools_z);
+  const auto search_slot = ui::PortraitSongTool(aspect, true);
+  PortraitPose(search, 1, search_slot.x, search_slot.z);
   edited.objects.push_back(std::move(search));
   edited.Before("sorting.lbl", {"portrait_search.lbl"});
-  for (const char* name : {"portrait_sort", "portrait_search"})
-    PortraitSurface(edited, buttons, name, layout.width / 2 - 3, 27,
-                    name == std::string_view("portrait_sort") ? -layout.width / 4 - 2 : layout.width / 4 + 2,
-                    layout.tools_z, {});
+  PortraitSurface(edited, buttons, "portrait_sort", sort_slot.width, sort_slot.height, sort_slot.x, sort_slot.z, {});
+  PortraitSurface(edited, buttons, "portrait_search", search_slot.width, search_slot.height, search_slot.x, search_slot.z, {});
   PortraitFooter(edited, buttons, aspect);
   SceneColor(edited.Find("portrait_retry.mat")->data, 0x19, 1, .855f, .086f, 1);
   auto color = *edited.Find("portrait_caption_black.color"); color.name = "portrait_songs.color";
@@ -2162,13 +2165,14 @@ bool PreparePortraitStore(const std::vector<uint8_t>& source,
   } else if (kind == "chrome") {
     hide({"album.lbl", "artist.lbl", "desc.lbl", "genre.lbl", "year.lbl",
           "microsoft.lbl", "ps_logo.mesh", "ps_logo_1080.mesh"});
-    label("crumb.lbl", -layout.width / 2 + 6, layout.tools_z, 12, layout.width - 12);
-    PortraitPose(*edited.Find("wait.grp"), .4f, layout.width / 2 - 10, layout.tools_z);
+    const float breadcrumb_z = ui::kPortraitLibraryContentTop - ui::kPortraitLibraryButtonHeight / 2;
+    label("crumb.lbl", -layout.width / 2 + 6, breadcrumb_z, 12, layout.width - 12);
+    PortraitPose(*edited.Find("wait.grp"), .4f, layout.width / 2 - 10, breadcrumb_z);
   } else if (kind == "details") {
     hide({"genre_screen.mesh", "album_info_screen.mesh", "pack_songs.lst"});
     const float left = -layout.width / 2 + 54;
-    for (const auto& [name, z] : {std::pair{"artist.lbl", -139.f}, {"album.lbl", -151.f},
-                                 {"genre.lbl", -163.f}, {"year.lbl", -175.f}})
+    for (const auto& [name, z] : {std::pair{"artist.lbl", layout.card_z + 19}, {"album.lbl", layout.card_z + 7},
+                                 {"genre.lbl", layout.card_z - 5}, {"year.lbl", layout.card_z - 17}})
       label(name, left, z, 10, z < -160 ? std::max(20.f, layout.width - 120) : layout.width - 64);
     SceneColor(edited.Find("black.color")->data, 17, 1, 1, 1, 1);
     // Album mesh geometry is baked in the landscape right column. Normalize
@@ -2213,8 +2217,12 @@ bool PreparePortraitStore(const std::vector<uint8_t>& source,
     else hide({"album.mesh", "scroller.grp", "shortcuts.grp"});
     const char* list_name = menu ? "filter.lst" : info ? "buttons.lst" : "song.lst";
     auto* list = edited.Find(list_name);
-    const float list_z = info ? -45.f : menu ? ui::kPortraitStoreMenuRowZ : ui::kPortraitStoreBrowserRowZ;
+    const float list_top = menu ? ui::kPortraitLibraryContentTop : layout.list_top;
+    const float list_z = info ? -45.f : layout.FirstRowZ(list_top);
     PortraitPose(*list, layout.list_scale, 0, list_z);
+    if (!menu && !info)
+      PortraitSurface(edited, buttons, "portrait_song_viewport", layout.width, list_top - layout.list_bottom,
+                      0, (list_top + layout.list_bottom) / 2, {});
     const char* old_resource = menu ? "../resource/lists/list_store_frontmenu.milo" :
         info ? "../resource/lists/list_store_songpage.milo" : "../resource/lists/list_held_button.milo";
     const auto resource = std::string("../resource/lists/portrait_store_") + std::string(kind) + ".milo";
@@ -2455,16 +2463,21 @@ bool PreparePortraitMessages(const std::vector<uint8_t>& source,
                     "../resource/lists/portrait_inbox.milo");
   const auto label = [&](const char* name, float z, float size) {
     auto& object = *edited.Find(name);
-    PortraitPose(object, 1, -layout.width / 2 + 10, z);
-    PortraitText(object, size, layout.width - 20, 0x11);
+    PortraitPose(object, 1, -layout.width / 2 + ui::kPortraitLibraryInset, z);
+    PortraitText(object, size, layout.width - 2 * ui::kPortraitLibraryInset, 0x11);
     // Keep the body's alternate bold font separate: sharing its material with
     // the primary font would let emphasis tint every glyph in the paragraph.
     for (const char* font : {"../resource/fonts/pentatonic_regularcond.milo",
                              "../resource/fonts/bureaugrot_wide_bold.milo",
                              "../resource/fonts/pentatonic.milo"})
       RenameSceneString(object.data, font, "../resource/fonts/portrait_splash.milo");
-    const auto font = std::search(object.data.begin(), object.data.end(), "../", "../" + 3);
+    constexpr std::string_view font_prefix = "../resource/fonts/";
+    const auto font = std::search(object.data.begin(), object.data.end(), font_prefix.begin(), font_prefix.end());
     PutBe32(object.data.data() + (font - object.data.begin()) - 41, 0);
+    // The retail body label discards characters beyond its fixed text length
+    // before wrapping. Keep the entire validated feed body available to scroll.
+    if (std::string_view(name) == "message.lbl")
+      PutBe32(object.data.data() + (font - object.data.begin()) - 25, messages::kMaxMessageBodyCharacters);
   };
   label("subject.lbl", layout.subject_top, 16);
   label("message.lbl", layout.body_top, 13);

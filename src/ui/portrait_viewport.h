@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <mutex>
+#include <optional>
 
 namespace rb_blitz::ui {
 
@@ -20,9 +21,14 @@ struct PortraitFit {
   float Z(float value) const { return value * scale + z; }
 };
 
+struct PortraitContentBounds {
+  float half_width, top, bottom;
+};
+
 // Fit the authored 480-unit canvas without enlarging it. Device cutouts and
 // a small gutter constrain the whole canvas, including animated decorations.
-inline PortraitFit FitPortraitViewport(float authored_aspect, PortraitViewport viewport) {
+inline PortraitFit FitPortraitViewport(float authored_aspect, PortraitViewport viewport,
+                                       std::optional<PortraitContentBounds> content = {}) {
   const auto& v = viewport;
   for (float value : {authored_aspect, v.width, v.height, v.safe_x, v.safe_y,
                       v.safe_width, v.safe_height})
@@ -38,6 +44,20 @@ inline PortraitFit FitPortraitViewport(float authored_aspect, PortraitViewport v
   }
   const float gutter = std::min({v.width, v.height, right - left, bottom - top}) * .02f;
   left += gutter; right -= gutter; top += gutter; bottom -= gutter;
+  if (content) {
+    // The library marquee is drawn separately. Keep the content at its
+    // authored position whenever the interactive page fits inside the safe area.
+    const float units = 480 / v.height;
+    left = (left - v.width / 2) * units;
+    right = (right - v.width / 2) * units;
+    top = (v.height / 2 - top) * units;
+    bottom = (v.height / 2 - bottom) * units;
+    const float scale = std::min({1.f, (top - bottom) / (content->top - content->bottom),
+                                  (right - left) / (2 * content->half_width)});
+    const float half_width = content->half_width * scale;
+    return {scale, std::max(left + half_width, std::min(0.f, right - half_width)),
+                   std::max(bottom - content->bottom * scale, std::min(0.f, top - content->top * scale))};
+  }
   const float scale = std::min({1.f, (bottom - top) / v.height,
                                (right - left) / (v.height * authored_aspect)});
   return {scale, ((left + right) / 2 - v.width / 2) * 480 / v.height,

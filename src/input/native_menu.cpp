@@ -372,9 +372,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   gameplay_resolution_active = GameplayResolutionScreen(name, panel_name, focus_name);
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene) &&
       (!ui::PortraitStoreScreen(name) || ui::screen::CurrentMenuConfiguration().rhythmverse_row);
-  const bool library = std::find(ui::kPortraitLibraryScreens.begin(), ui::kPortraitLibraryScreens.end(), name) !=
-      ui::kPortraitLibraryScreens.end();
-  portrait_panel_state.Publish(library ? loaded_panel_dir : current_panel_dir, portrait_splash_active, name);
+  portrait_panel_state.Publish(ui::PortraitLibraryScreen(name) ? loaded_panel_dir : current_panel_dir,
+                               portrait_splash_active, name);
   current_panel_name = panel_name;
   // The store modal focuses the panel without a UIComponent. Its action
   // labels live in the loaded PanelDir, independent of the focus directory.
@@ -668,6 +667,11 @@ bool GameplayResolutionActive() {
 bool PortraitSplashActive() {
   std::lock_guard lock(mutex);
   return portrait_splash_active;
+}
+bool PortraitLibraryActive() {
+  if (!settings::InterfacePortraitEnabled()) return false;
+  const auto panel = portrait_panel_state.Snapshot();
+  return panel.active && (ui::PortraitLibraryScreen(panel.screen) || ui::PortraitLibraryTransition(panel.screen));
 }
 bool PortraitSettingsActive() {
   std::lock_guard lock(mutex);
@@ -1338,8 +1342,7 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
       if (song_control) {
         const auto layout = ui::PortraitSongs(aspect);
         slot = hub_arrow ? ui::PortraitHubArrowTarget(layout, stem == "portrait_header_next") :
-            ui::PortraitCalibrationAction{(stem == "portrait_sort" ? -1.f : 1.f) * (layout.width / 4 + 2),
-                                          layout.tools_z, layout.width / 2 - 3, 27};
+            ui::PortraitSongTool(aspect, stem == "portrait_search");
       } else slot = PortraitFooterSlot(ctx, base, dir, index, count);
       // Hub arrows belong to the unfitted background marquee, like its title.
       const auto fit = hub_arrow ? ui::PortraitFit{} : portrait_draw_fit;
@@ -1791,8 +1794,8 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
   } else if (DrawScreenName() == "inbox_screen" && (name == "subject.lbl" || name == "message.lbl")) {
     const auto layout = ui::PortraitMessages(aspect);
     const bool subject = name == "subject.lbl";
-    x = -layout.width / 2 + 10; z = subject ? layout.subject_top : layout.body_top;
-    available_width = layout.width - 20;
+    x = -layout.width / 2 + ui::kPortraitLibraryInset; z = subject ? layout.subject_top : layout.body_top;
+    available_width = layout.width - 2 * ui::kPortraitLibraryInset;
     available_height = subject ? layout.subject_height : layout.body_height;
   } else if (DrawScreenName() == "recommendation_screen") {
     // UIList draws a cloned label. Its provider field keeps the authored name.
@@ -1984,11 +1987,14 @@ bool DrawPortraitStoreDialogControl(PPCContext& ctx, uint8_t* base, uint32_t lab
 }
 
 void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  const auto name = ObjectName(base, ObjectBase(base, label));
+  // The stock marquee slides its own labels while the portrait panels draw
+  // their localized titles. Only the latter belong in the portrait marquee.
+  if (ui::PortraitLibraryBackgroundTitle(name) && PortraitLibraryActive()) return;
   if (!drawing_panel_screen.empty())
     UpdatePortraitPanelTranslation(ctx, base, label + 72 + U32(base, U32(base, label + 72) + 16));
   DrawPresetArrows(ctx, base, label);
   const bool portrait = settings::InterfacePortraitEnabled();
-  const auto name = ObjectName(base, ObjectBase(base, label));
   const bool settings_title = name == "header.lbl" && SettingsMenuPanel();
   if (!settings_title) RestoreMenuGlyphUpload(ctx, base, label, false);
   if (DrawPortraitStoreDialogControl(ctx, base, label, name)) return;
@@ -2137,12 +2143,14 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (song_tool || song_tab >= 0) {
     const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
     const auto layout = ui::PortraitSongs(aspect);
-    const auto fit = portrait_draw_fit;
-    float available = layout.width / 2 - 10;
+    const auto fit = song_tool ? portrait_draw_fit : ui::PortraitFit{};
+    float available = 0;
     float desired_height = 12;
     if (song_tool) {
-      x = fit.X((name == "sorting.lbl" ? -1.f : 1.f) * (layout.width / 4 + 2));
-      z = fit.Z(layout.tools_z);
+      const auto slot = ui::PortraitSongTool(aspect, name == "portrait_search.lbl");
+      x = fit.X(slot.x);
+      z = fit.Z(slot.z);
+      available = slot.width - 8;
     } else {
       // The shared background panel draws the marquee outside the content's
       // safe-area transform. Keep its title at that same screen-space anchor.
@@ -2607,10 +2615,20 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
       const auto layout = ui::PortraitMessages(ui::screen::CurrentMenuConfiguration().portrait_aspect);
       pitch = (geometry.bounds.bottom - geometry.bounds.top) * layout.row_step / layout.row_height;
     }
-    if (pitch > 0)
-      target = {list, frame_number, geometry.bounds, pitch,
+    if (pitch > 0) {
+      auto bounds = geometry.bounds;
+      const bool song_viewport = portrait && ((DrawScreenName() == "song_select_screen" &&
+          (list_name == "songs.lst" || list_name == "song_search.lst")) ||
+          (DrawScreenName() == "store_browser_screen" && list_name == "song.lst"));
+      const auto dir = list_header ? U32(base, list_header + 36) : 0;
+      if (song_viewport && dir) {
+        const auto mesh = SceneMesh(ctx, base, dir, "portrait_song_viewport.mesh");
+        if (const auto viewport = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) bounds = *viewport;
+      }
+      target = {list, frame_number, bounds, pitch,
                 int(U32(base, list + 224)), rail_map.max_first,
                 powerup_choices ? TouchScrollAxis::kHorizontal : TouchScrollAxis::kVertical};
+    }
   }
   {
     std::lock_guard lock(mutex);
@@ -2625,7 +2643,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
     touch_scroll.Limit(target.maximum);
   }
 }
-std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
+std::optional<ui::PortraitFit> PortraitPanelDrawFit(uint8_t* base, uint32_t drawable) {
   if (!settings::InterfacePortraitEnabled()) return {};
   const auto panel = portrait_panel_state.Snapshot();
   if (!panel.active) return {};
@@ -2638,7 +2656,26 @@ std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
       !ui::PortraitLibraryPanelScreen(name).empty();
   if (!store_panel && !transition_panel &&
       (!panel.directory || object != ObjectBase(base, panel.directory))) return {};
-  return ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width / 480;
+  const float aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+  const bool library_panel = transition_panel || store_panel || ui::PortraitLibraryScreen(panel.screen);
+  const auto viewport = ui::CurrentPortraitViewport();
+  const float canvas_aspect = ui::PortraitSplash(aspect).width / 480;
+  constexpr float border = 2;  // Includes the row and footer mesh rims.
+  const float top = panel.screen == "store_info_screen" ? ui::PortraitStoreOfferLayout::top :
+                                                          ui::kPortraitLibraryContentTop;
+  const bool fit_content = library_panel && name != "error_general";
+  const auto fit = fit_content ? ui::FitPortraitViewport(canvas_aspect, viewport, ui::PortraitContentBounds{
+      ui::PortraitLibraryWidth(aspect) / 2 + border, top + border,
+      ui::kPortraitLibraryFooterZ - ui::kPortraitLibraryButtonHeight / 2 - border}) :
+      ui::FitPortraitViewport(canvas_aspect, viewport);
+  // RhythmVerse can draw a library panel and a separate native panel in one frame.
+  static thread_local std::array<ui::PortraitFit, 2> logged_fits;
+  auto& logged = logged_fits[fit_content];
+  if (logged.scale != fit.scale || logged.x != fit.x || logged.z != fit.z) {
+    REXLOG_INFO("portrait: panel canvas aspect {}, fit scale {} offset {},{}", canvas_aspect, fit.scale, fit.x, fit.z);
+    logged = fit;
+  }
+  return fit;
 }
 
 void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,

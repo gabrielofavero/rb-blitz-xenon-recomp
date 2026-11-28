@@ -7,7 +7,6 @@
 #include <rex/ppc/hook.h>
 #include <rex/ppc/call.h>
 #include <rex/memory/endian.h>
-#include <rex/logging/log_category.h>
 #include <rex/utility.h>
 
 REX_EXTERN(__imp__sub_824C8E88); // PanelDir::DrawShowing, before component traversal
@@ -30,23 +29,13 @@ REX_HOOK_RAW(sub_824C8E88) {
   const auto directory = rb_blitz::input::PanelDirectoryFromDrawable(drawable,
       [base](uint32_t address) { return rex::memory::load_and_swap<uint32_t>(base + address); });
   if (rb_blitz::ui::portrait_dialog::SuppressDirectory(directory)) return;
-  const auto aspect = drawing ? std::optional<float>{} :
-      rb_blitz::input::PortraitPanelDrawAspect(base, drawable);
-  if (!aspect) {
+  const auto panel_fit = drawing ? std::optional<rb_blitz::ui::PortraitFit>{} :
+      rb_blitz::input::PortraitPanelDrawFit(base, drawable);
+  if (!panel_fit) {
     __imp__sub_824C8E88(ctx, base);
     return;
   }
-  const auto fit = rb_blitz::ui::FitPortraitViewport(*aspect,
-      rb_blitz::ui::CurrentPortraitViewport());
-  static thread_local float logged_aspect = 0;
-  static thread_local rb_blitz::ui::PortraitFit logged_fit;
-  if (logged_aspect != *aspect || logged_fit.scale != fit.scale ||
-      logged_fit.x != fit.x || logged_fit.z != fit.z) {
-    REXLOG_INFO("portrait: panel canvas aspect {}, fit scale {} offset {},{}", *aspect,
-                fit.scale, fit.x, fit.z);
-    logged_aspect = *aspect;
-    logged_fit = fit;
-  }
+  const auto fit = *panel_fit;
   // Fit once at the owning panel, before components and ordinary drawables.
   // PanelDir's RndDrawable view has its transform at +80 (821F65C8).
   // Nested resource dirs inherit it, and the native camera projects hit bounds

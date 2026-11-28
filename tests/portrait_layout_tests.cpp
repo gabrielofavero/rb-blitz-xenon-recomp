@@ -30,8 +30,9 @@ bool rb_blitz::ui::portrait_dialog::SuppressDirectory(uint32_t directory) {
   return suppress_dialog && directory == kPanel - 156;
 }
 
-std::optional<float> rb_blitz::input::PortraitPanelDrawAspect(uint8_t*, uint32_t drawable) {
-  return eligible && drawable == kPanel ? std::optional<float>{aspect} : std::nullopt;
+std::optional<rb_blitz::ui::PortraitFit> rb_blitz::input::PortraitPanelDrawFit(uint8_t*, uint32_t drawable) {
+  if (!eligible || drawable != kPanel) return {};
+  return rb_blitz::ui::FitPortraitViewport(aspect, rb_blitz::ui::CurrentPortraitViewport());
 }
 void rb_blitz::input::DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t,
                                        void (*draw)(PPCContext&, uint8_t*)) {
@@ -89,12 +90,14 @@ int main() {
     CHECK_TRUE(kPortraitMenuRowStep > 55.25f);
   }
   BeginCase("library transitions retain portrait for both native panel layouts");
-  for (const auto source : kPortraitLibraryScreens)
+  for (const auto source : kPortraitLibraryScreens) {
+    CHECK_TRUE(PortraitLibraryScreen(source));
     for (const auto destination : kPortraitLibraryScreens) {
       const auto transition = std::string("trans_") + std::string(source) + "_" + std::string(destination);
       CHECK_TRUE(PortraitLibraryTransition(transition));
       CHECK_TRUE(PortraitSplashScreen(transition, ""));
     }
+  }
   for (const auto screen : {"song_select_screen", "trans_splash_screen_song_select_screen",
                             "trans_song_select_screen_powerup_select_screen",
                             "trans_song_select_screen_inbox_screen_extra"})
@@ -104,6 +107,12 @@ int main() {
   CHECK_TRUE(PortraitLibraryPanelScreen("InboxPanel") == "inbox_screen");
   CHECK_TRUE(PortraitLibraryPanelScreen("RecommendationsPanel") == "recommendation_screen");
   CHECK_TRUE(PortraitLibraryPanelScreen("PanelDir").empty());
+  CHECK_FALSE(PortraitLibraryScreen("splash_screen"));
+  CHECK_TRUE(PortraitLibraryBackgroundTitle("main_my_songs.lbl"));
+  CHECK_TRUE(PortraitLibraryBackgroundTitle("main_inbox.lbl"));
+  CHECK_TRUE(PortraitLibraryBackgroundTitle("main_store.lbl"));
+  CHECK_FALSE(PortraitLibraryBackgroundTitle("portrait_tab_messages.lbl"));
+  CHECK_FALSE(PortraitLibraryBackgroundTitle("shell_arrow_rt.lbl"));
   BeginCase("library tab titles share the settled marquee center at every portrait width");
   for (const float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
     constexpr float rail_center = (204.37974548339844f + 169.7950897216797f) / 2;
@@ -125,18 +134,51 @@ int main() {
     CHECK_TRUE((64 + 46 + 16) * layout.choices_scale < layout.width / 2);
     CHECK_TRUE(layout.description_z > PortraitFooterAction(aspect, 0, 2).z + 30);
   }
-  BeginCase("portrait songs reserve separate rows, details and footer at phone and tablet aspects");
+  BeginCase("portrait library aligns page edges and fits every whole song row above the details card");
   for (float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
     const auto layout = PortraitSongs(aspect);
-    CHECK_TRUE(layout.rows >= 4 && layout.rows <= 7);
-    CHECK_TRUE(layout.list_z - (layout.rows - 1) * kPortraitSongRowStep * layout.list_scale -
-               kPortraitSongRowHeight / 2 * layout.list_scale > layout.card_z + layout.card_height / 2);
+    const auto search = PortraitSongTool(aspect, true);
+    const auto messages = PortraitMessages(aspect);
+    const auto recommendations = PortraitRecommendations(aspect);
+    Close(search.x + search.width / 2, layout.width / 2);
+    Close(search.z + search.height / 2, kPortraitLibraryContentTop);
+    Close(messages.list_z + messages.row_height / 2, kPortraitLibraryContentTop);
+    Close(recommendations.hero_top, kPortraitLibraryContentTop);
+    Close(messages.width, layout.width);
+    Close(recommendations.width, layout.width);
+    for (const float top : {layout.list_top, kPortraitLibraryContentTop}) {
+      const int rows = layout.Rows(top, layout.list_bottom);
+      CHECK_TRUE(rows >= 4);
+      const float last_bottom = layout.FirstRowZ(top) - (rows - 1) * kPortraitSongRowStep * layout.list_scale -
+                                kPortraitSongRowHeight / 2 * layout.list_scale;
+      CHECK_TRUE(last_bottom >= layout.list_bottom);
+      CHECK_TRUE(last_bottom - kPortraitSongRowStep * layout.list_scale < layout.list_bottom);
+      if (aspect == 201.f / 437 && top == layout.list_top) CHECK_EQ(rows, 8);
+    }
     for (size_t i = 0; i < 3; ++i) {
       const auto slot = PortraitLibraryFooter(aspect, i, 3);
       CHECK_TRUE(std::abs(slot.x) + slot.width / 2 <= layout.width / 2 + .001f);
       CHECK_TRUE(slot.z + slot.height / 2 < layout.card_z - layout.card_height / 2);
     }
   }
+  BeginCase("library page content keeps its authored size when clear of phone cutouts");
+  constexpr float phone_aspect = 201.f / 437;
+  const PortraitContentBounds library{PortraitLibraryWidth(phone_aspect) / 2 + 2,
+      kPortraitLibraryContentTop + 2, kPortraitLibraryFooterZ - kPortraitLibraryButtonHeight / 2 - 2};
+  const auto library_phone = FitPortraitViewport(phone_aspect, {402, 874, 0, 62, 402, 784}, library);
+  Close(library_phone.scale, 1);
+  Close(library_phone.x, 0);
+  Close(library_phone.z, 0);
+  const auto deeper_inset = FitPortraitViewport(phone_aspect, {402, 874, 0, 62, 402, 778}, library);
+  Close(deeper_inset.scale, 1);
+  CHECK_TRUE(deeper_inset.z > 0 && deeper_inset.z < 3);
+  const PortraitViewport constrained{402, 874, 24, 126, 349, 668};
+  const auto constrained_fit = FitPortraitViewport(phone_aspect, constrained, library);
+  CHECK_TRUE(constrained_fit.scale < 1);
+  CHECK_TRUE(201 + constrained_fit.X(-library.half_width) * 874 / 480 > constrained.safe_x);
+  CHECK_TRUE(201 + constrained_fit.X(library.half_width) * 874 / 480 < constrained.safe_x + constrained.safe_width);
+  CHECK_TRUE(437 - constrained_fit.Z(library.top) * 874 / 480 > constrained.safe_y);
+  CHECK_TRUE(437 - constrained_fit.Z(library.bottom) * 874 / 480 < constrained.safe_y + constrained.safe_height);
   BeginCase("phone and tablet canvases stay inside asymmetric safe areas after resizing");
   for (const float authored : {.35f, 201.f / 437, 9.f / 16, .75f, .9f}) {
     for (const PortraitViewport v : {PortraitViewport{402, 874, 0, 62, 402, 778},

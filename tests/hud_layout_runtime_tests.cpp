@@ -39,6 +39,7 @@ std::array<uint32_t, 16> transforms{};
 uint32_t drawn_child = 0;
 float drawn_x = 0;
 bool using_touch = false, buttons_enabled = true, powerup_ready = false;
+bool portrait_library = false;
 unsigned property_writes = 0;
 unsigned lane_captures = 0;
 rb_blitz::input::touch::Layout touch_layout{874, 402, {90, 28, 46, 46}};
@@ -146,6 +147,7 @@ uint32_t GameplayPortraitHeight() { return crop_height; }
 }
 namespace rb_blitz::input {
 void CaptureLanePowerup(PPCContext&, uint8_t*, uint32_t) { ++lane_captures; }
+bool PortraitLibraryActive() { return portrait_library; }
 }
 namespace rb_blitz::input::touch {
 Layout CurrentLayout() { return touch_layout; }
@@ -363,6 +365,19 @@ int main() {
   Resolve(portrait_menu);
   Close(Float(portrait_menu + 0x78), 270);
   Close(Float(portrait_menu + 72), 1);
+
+  BeginCase("the city foreground skips draw only in the portrait library");
+  Reset();
+  const Shape foreground_shape{"foreground.grp", 0x82024C4C, -0x108, 0};
+  const Shape city_shape{"city_art.grp", 0x82024C4C, -0x108, 0};
+  const auto foreground = Make(0, foreground_shape, 0, kOtherDir);
+  const auto city = Make(1, city_shape, 0, kOtherDir);
+  Draw(foreground, foreground_shape, true);
+  portrait_library = true;
+  Draw(foreground, foreground_shape, true, false);
+  Draw(city, city_shape, true);
+  portrait_library = false;
+  Draw(foreground, foreground_shape, true);
 
   BeginCase("portrait layout uses crop bounds while the guest renders an unchanged landscape source");
   Reset();

@@ -118,7 +118,7 @@ bool ParseFeed(std::string_view body, MessageFeed* feed, std::string* error) {
     Message message;
     if (!row.is_object() || !Field(row, "id", &message.id) || !Id(message.id) ||
         !Field(row, "title", &message.title) || !Visible(message.title, 64, false) ||
-        !Field(row, "body", &message.body) || !Visible(message.body, 1024, true) ||
+        !Field(row, "body", &message.body) || !Visible(message.body, kMaxMessageBodyCharacters, true) ||
         !Field(row, "published", &message.published) || !Date(message.published) ||
         !ids.insert(message.id).second) {
       parsed.warnings.push_back("dropped invalid or duplicate message");

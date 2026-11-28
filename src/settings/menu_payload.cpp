@@ -442,7 +442,7 @@ bool SetHeaderAnimationBeforeGoto(Node& function, Node direction) {
 // tab breaks that inference, and two-tab rings need opposite swipes for the same
 // endpoints. Trigger and mouse routes override it; keep the retail expression intact
 // for every other caller. See RhythmVerse plan P9-4's animation/layout correction.
-bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why, bool portrait) {
+bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why) {
   if (!roots) { if (why) *why = "no transition definitions"; return false; }
   auto staged = *roots;
   Node* between = nullptr;
@@ -471,29 +471,6 @@ bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why
       Node::Command({Node::Symbol("if_else"),
           Node::Command({Node::Symbol(">"), property(), Node::Int(0)}),
           Node::Symbol("shift_right"), Node::Symbol("shift_left")}), animation->kids[1]});
-  if (portrait) {
-    auto* enter = FindNode(*transition, ui::dtb::kArray, "enter");
-    if (!enter) {
-      if (why) *why = "portrait header transition lacks its entry handler";
-      return false;
-    }
-    // The horizontal Flow pans the landscape foreground across the camera.
-    // Keep it out of portrait tab swipes while the existing Flow moves the
-    // marquee and page content. Restore the guest's visibility on exit.
-    const auto s = [](std::string_view value) { return Node::Symbol(value); };
-    const auto c = [](std::vector<Node> nodes) { return Node::Command(std::move(nodes)); };
-    const auto foreground = c({s("background_panel"), s("find"), s("foreground.grp")});
-    const auto saved = s("rbbz_header_foreground_visible");
-    const auto self = Node::Var("this");
-    const auto showing = [&](const char* value) { return c({foreground, s("set_showing"), s(value)}); };
-    enter->kids.push_back(c({s("if"), c({s("!="), property(), Node::Int(0)}),
-        c({self, s("set"), saved, c({foreground, s("showing")})}),
-        showing("FALSE")}));
-    transition->kids.push_back(Node::Array({saved, s("FALSE")}));
-    transition->kids.push_back(Node::Array({s("exit"),
-        c({s("if"), Node::Property({saved}), showing("TRUE"),
-            c({self, s("set"), saved, s("FALSE")})})}));
-  }
   transition->kids.push_back(Node::Array({Node::Symbol("rbbz_header_animation"), Node::Int(0)}));
   staged.push_back(std::move(directional));
   staged.push_back(Node::Command({Node::Symbol("func"), Node::Symbol(kLibraryHeaderTransition),
@@ -1788,12 +1765,14 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
     apply.push_back(c({s(name), s("set_token_fmt"), s(token)}));
     apply.push_back(c({s(name), s("set_showing"), s("TRUE")}));
   }
+  const int rows = layout.Rows(layout.list_top, layout.list_bottom);
   for (const char* name : {"songs.lst", "song_search.lst"}) {
-    apply.push_back(c({s(name), s("set"), s("display_num"), Node::Int(layout.rows)}));
-    apply.push_back(c({s(name), s("set"), s("max_display"), Node::Int(layout.rows - 1)}));
+    apply.push_back(c({s(name), s("set"), s("display_num"), Node::Int(rows)}));
+    apply.push_back(c({s(name), s("set"), s("max_display"), Node::Int(rows - 1)}));
   }
   apply.push_back(c({s("song_search.lst"), s("set"), s("list_resource"), s("portrait_song_search")}));
-  apply.push_back(c({s("song_search.lst"), s("set_local_pos"), Node::Int(0), Node::Int(0), f(layout.list_z)}));
+  apply.push_back(c({s("song_search.lst"), s("set_local_pos"), Node::Int(0), Node::Int(0),
+                     f(layout.FirstRowZ(layout.list_top))}));
   apply.push_back(c({s("song_search.lst"), s("set_local_scale"), f(layout.list_scale), f(layout.list_scale), f(layout.list_scale)}));
   const float album_scale = .24f;
   apply.push_back(c({s("album_art"), s("set_local_scale"), f(album_scale), f(album_scale), f(album_scale)}));
@@ -1802,7 +1781,8 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
   apply.push_back(c({c({s("album_art"), s("find"), s("album_black_bg.mesh")}),
                      s("set"), s("showing"), s("FALSE")}));
   apply.push_back(c({s("diff_meter_rnd"), s("set_local_scale"), f(.32f), f(.32f), f(.32f)}));
-  apply.push_back(c({s("diff_meter_rnd"), s("set_local_pos"), f(layout.width / 2 - 35), Node::Int(0), f(-178)}));
+  apply.push_back(c({s("diff_meter_rnd"), s("set_local_pos"), f(layout.width / 2 - 35), Node::Int(0),
+                     f(layout.card_z - 20)}));
   apply.push_back(c({s("songs.lst"), s("refresh")}));
   // Size and refresh the list once as it loads. The native enter handler can
   // then restore the saved song with the final list geometry in place.
@@ -1908,8 +1888,10 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
         {"store_menu_panel", "new_provider", "filter.lst", "portrait_store_menu"},
         {"store_browser_panel", "refresh_list", "song.lst", "portrait_store_browser"}}) {
       const bool menu = std::string_view(name) == "filter.lst";
-      auto commands = list(name, layout.rows, resource,
-                           menu ? ui::kPortraitStoreMenuRowZ : ui::kPortraitStoreBrowserRowZ);
+      const float top = menu ? ui::kPortraitLibraryContentTop : layout.list_top;
+      const float bottom = menu ? ui::kPortraitLibraryFooterTop + ui::kPortraitLibraryGap : layout.list_bottom;
+      const int rows = layout.Rows(top, bottom, menu ? ui::kPortraitMenuRowStep : ui::kPortraitSongRowStep);
+      auto commands = list(name, rows, resource, layout.FirstRowZ(top));
       if (!menu)
         commands.push_back(c({s("store_details_panel"), s("rbbz_portrait_offer_layout"), s("FALSE")}));
       commands.push_back(c({s("portrait_tab_store.lbl"), s("set_token_fmt"), s("store")}));
@@ -1926,7 +1908,7 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
         return c({s(name), s("set_showing"), s(showing ? "TRUE" : "FALSE")});
       };
       const float left = expanded ? offer.Left() : -layout.width / 2 + 54;
-      const float z = expanded ? offer.ExtrasTop() : -151.f;
+      const float z = expanded ? offer.ExtrasTop() : layout.card_z + 7;
       return c({s("do"),
           scale(s("album.mesh"), expanded ? offer.art_size / 40 : 1),
           position("album.mesh", expanded ? 0.f : -layout.width / 2 + 27,
@@ -1936,7 +1918,7 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
           show("artist.lbl", !expanded),
           position("album.lbl", left, z), position("genre.lbl", left, z - (expanded ? 10 : 12)),
           position("year.lbl", left, z - (expanded ? 23 : 24)),
-          position("difficulty", layout.width / 2 - 30, expanded ? z - 24 : -178.f)});
+          position("difficulty", layout.width / 2 - 30, expanded ? z - 24 : layout.card_z - 20)});
     };
     for (auto& root : staged) {
       if (root.tag != ui::dtb::kCommand || root.kids.size() < 3 || root.kids[2].text != "store_details_panel") continue;
@@ -3095,7 +3077,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return !portrait_interface || FitPortraitLibraryHeader(&roots, menu_config.portrait_aspect, error);
       })) return false;
   if (!edit("ui/gen/transition_screens.dtb", [&](auto& roots) {
-        return ConfigureLibraryHeaderAnimations(&roots, error, portrait_interface);
+        return ConfigureLibraryHeaderAnimations(&roots, error);
       })) return false;
   for (const auto& [path, tab] : std::array<std::pair<const char*, LibraryHeader>, 4>{{
       {"ui/song_select/gen/song_select.dtb", LibraryHeader::kSongs},

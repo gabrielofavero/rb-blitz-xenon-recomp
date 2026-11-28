@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +10,7 @@ namespace rb_blitz::messages {
 
 inline constexpr std::string_view kFeedUrl =
     "https://gabrielofavero.github.io/rb-blitz-xenon-recomp/feed.json";
+inline constexpr std::size_t kMaxMessageBodyCharacters = 1024;
 
 struct Message {
   std::string id;

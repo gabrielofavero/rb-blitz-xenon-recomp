@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #pragma once
 
+#include "ui/portrait_viewport.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -24,7 +26,7 @@ MenuPoint MenuWindowPointer(float x, float y, int width, int height);
 // Absolute guest UI positions authored by draw hooks share the panel's safe fit.
 MenuPoint PortraitDrawPoint(float x, float z);
 MenuPoint PortraitPanelTranslation();
-std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
+std::optional<ui::PortraitFit> PortraitPanelDrawFit(uint8_t* base, uint32_t drawable);
 // Transition screens draw both library panels; each retains its own layout identity.
 void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
                        void (*draw)(PPCContext&, uint8_t*));
@@ -612,6 +614,7 @@ bool MenuScreenIs(std::string_view name);
 bool MainMenuMusicInputAvailable();
 // Portrait title/main menu, loading panels, and native confirmation/error prompts.
 bool PortraitSplashActive();
+bool PortraitLibraryActive();
 bool PortraitSettingsActive();
 bool PortraitConnectionActive();
 bool PortraitCalibrationActive();

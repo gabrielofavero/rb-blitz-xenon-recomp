@@ -607,6 +607,9 @@ extern "C" REX_FUNC(sub_82226CD8) {
   const auto header = ObjectBase(base, ctx.r3.u32);
   if (header && U32(base, header) == 0x82024C4C) {
     const auto name = U32(base, header + 32);
+    // The background Flow can expose this group while panning between tabs.
+    // Skip its draw in the portrait library without editing its Flow state.
+    if (NameIs(base, name, "foreground.grp") && rb_blitz::input::PortraitLibraryActive()) return;
     if (NameIs(base, name, "powerup.grp"))
       rb_blitz::input::CaptureLanePowerup(ctx, base, U32(base, header + 36));
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)

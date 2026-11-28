@@ -26,6 +26,7 @@
 #include "ui/portrait_dialog_payload.h"
 #include "input/calibration_text.h"
 #include "input/inline_help.h"
+#include "messages/messages_api.h"
 #include <array>
 #include "ui/settings_screen.h"
 
@@ -627,15 +628,9 @@ void TestHeaderAnimations() {
   if (binding && old) CHECK_TRUE(dtb::Compile({binding->kids[1].kids[3]}) == dtb::Compile({old->kids[1]}));
   for (int mask = 0; mask < 8; ++mask) CheckAnimations(roots, mask);
   CHECK_FALSE(Has(*Function(roots, "create_one_way_transition_screen"), "foreground.grp"));
-  auto portrait = original;
-  CHECK_TRUE(settings::ConfigureLibraryHeaderAnimations(&portrait, &why, true));
-  const auto* factory = Function(portrait, "create_one_way_transition_screen");
-  const auto* enter = Find(*factory, dtb::kArray, "enter");
-  const auto* exit = Find(*factory, dtb::kArray, "exit");
-  CHECK_TRUE(enter && Has(*enter, "native_enter") && Has(*enter, "foreground.grp") &&
-             Has(*enter, "rbbz_header_animation"));
-  CHECK_TRUE(exit && Has(*exit, "foreground.grp") && Has(*exit, "rbbz_header_foreground_visible"));
-  for (int mask = 0; mask < 8; ++mask) CheckAnimations(portrait, mask);
+  const auto* enter = Find(*Function(roots, "create_one_way_transition_screen"), dtb::kArray, "enter");
+  const auto* native_enter = Find(*Function(original, "create_one_way_transition_screen"), dtb::kArray, "enter");
+  CHECK_TRUE(enter && native_enter && dtb::Compile({*enter}) == dtb::Compile({*native_enter}));
   auto invalid = AnimationFixture();
   invalid.pop_back();
   const auto before = dtb::Compile(invalid);
@@ -2146,7 +2141,8 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.body_top - layout.body_height > layout.detail_bottom);
     const auto back = rb_blitz::ui::PortraitLibraryFooter(aspect, 0, 1);
     CHECK_TRUE(back.width == layout.width);
-    CHECK_TRUE(layout.detail_bottom > back.z + back.height / 2);
+    const float scene_rims = 1.4f;  // Both border meshes extend 0.7 units beyond the panels.
+    CHECK_TRUE(layout.detail_bottom - (back.z + back.height / 2) - scene_rims >= 8);
   }
   BeginCase("portrait Messages keeps Back in the footer and measures text after provider callbacks");
   {
@@ -3564,7 +3560,7 @@ int main(int argc, char** argv) {
         CHECK_TRUE(std::abs(center - (right ? arrow_x : -arrow_x)) < .001f);
         CHECK_TRUE(width >= 64 && height >= 52);
         CHECK_TRUE(width / 2 < std::abs(center));
-        CHECK_TRUE(layout.tabs_z - height / 2 > layout.tools_z + 27.f / 2);
+        CHECK_TRUE(layout.tabs_z - height / 2 > rb_blitz::ui::kPortraitLibraryContentTop);
         CHECK_FALSE(object_showing(objects.at(stem + "_surface.grp"), 0x21));
       }
     };
@@ -3636,6 +3632,12 @@ int main(int argc, char** argv) {
       CHECK_TRUE(panel.contains("portrait_messages_list.mesh"));
       CHECK_TRUE(contains(panel.at("message.lbl"), "portrait_splash.milo"));
       CHECK_TRUE(contains(panel.at("message.lbl"), "pentatonic_bold.milo"));
+      const auto& body = panel.at("message.lbl");
+      constexpr std::string_view body_font = "../resource/fonts/portrait_splash.milo";
+      const auto font_at = std::search(body.begin(), body.end(), body_font.begin(), body_font.end());
+      CHECK_TRUE(font_at != body.end() && font_at - body.begin() >= 25);
+      if (font_at != body.end() && font_at - body.begin() >= 25)
+        CHECK_EQ(u32(body.data() + (font_at - body.begin()) - 25), rb_blitz::messages::kMaxMessageBodyCharacters);
       const auto layout = rb_blitz::ui::PortraitMessages(aspect);
       const auto& slide = panel.at("TransAnim.tnm");
       const float distance = 1022 * rb_blitz::ui::PortraitSplash(aspect).width / (480 * 16.f / 9);
@@ -4063,7 +4065,7 @@ int main(int argc, char** argv) {
       const auto objects = stored_objects(portrait.at(font::kSongSelectRecord));
       for (const char* name : {"songs.lst", "shortcuts.lst", "portrait_sort.mesh",
                                "portrait_search.mesh", "portrait_song_title.lbl",
-                               "portrait_song_card.mesh", "shortcuts.grp"})
+                               "portrait_song_card.mesh", "portrait_song_viewport.mesh", "shortcuts.grp"})
         CHECK_TRUE(objects.contains(name));
       check_hub_arrow_targets(objects, config.portrait_aspect);
       CHECK_FALSE(objects.contains("scroll_arrow.tex"));
@@ -4121,6 +4123,18 @@ int main(int argc, char** argv) {
       const auto* loaded = song_method("finish_load");
       CHECK_TRUE(enter && !header_test::Has(*enter, "rbbz_portrait_layout"));
       CHECK_TRUE(loaded && header_test::Has(*loaded, "rbbz_portrait_layout"));
+      const auto layout = rb_blitz::ui::PortraitSongs(config.portrait_aspect);
+      const auto* apply = song_method("rbbz_portrait_layout");
+      int sized_lists = 0;
+      if (apply) for (const auto& command : apply->kids) {
+        const auto& k = command.kids;
+        if (k.size() == 4 && k[1].text == "set" && k[2].text == "display_num") {
+          CHECK_TRUE(k[0].text == "songs.lst" || k[0].text == "song_search.lst");
+          CHECK_EQ(k[3].scalar, uint32_t(layout.Rows(layout.list_top, layout.list_bottom)));
+          ++sized_lists;
+        }
+      }
+      CHECK_EQ(sized_lists, 2);
       for (const char* name : {"mounting_finished", "mounting_failed", "on_return_from_song_leaderboard"}) {
         const auto* method = song_method(name);
         CHECK_TRUE(method && header_test::Has(*method, "get_current_song"));
