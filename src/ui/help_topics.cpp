@@ -55,30 +55,28 @@ std::string_view RetailListName(const std::string_view screen) {
 }  // namespace
 
 std::string TextForSymbol(const std::string_view symbol) {
-  if (symbol == "settings_dlc_menu_songs" || symbol == "settings_music_navigation")
-    return screen::HelpTextFor(symbol);
   if (symbol.empty()) {
     return {};
   }
   // The retail rows this table owns. Checked first because none of these names can be a generated
   // row's (the generated ones are `settings_*` or the five adopted retail labels).
   if (symbol == "av_overscan") {
-    return "Fill the screen to its edges.";
+    return "Fill the screen to its edges";
   }
   if (symbol == "av_active_track_volume") {
-    return "Boost the active track volume.";
+    return "Boost the active track volume";
   }
   if (symbol == "av_sound_volume") {
-    return "Adjust sound effects volume.";
+    return "Adjust sound effects volume";
   }
   if (symbol == "av_bass_boost") {
-    return "Add extra bass to the mix.";
+    return "Add extra bass to the mix";
   }
   if (symbol == "tutorialsong") {
-    return "Learn the basics of Rock Band Blitz.";
+    return "Learn the basics of Rock Band Blitz";
   }
   if (symbol == "tutorialsong3") {
-    return "Advanced techniques for higher scores.";
+    return "Advanced techniques for higher scores";
   }
   return screen::HelpTextFor(symbol);
 }
@@ -129,15 +127,7 @@ std::string CaptionFor(const Observation& observation) {
     return {};
   }
 
-  // Calibration gets **no** caption at all (owner request, 2026-10-14). Its own screens draw the
-  // wizard's instructions and its own A/B prompts, and an extra overlay competes with them; the
-  // caption the player needs - the root row that opens the wizard - is published by the generated
-  // table before entering, and `EnterRetail` hides it on the way in. So `cal_welcome_screen` is
-  // deliberately absent from this function *and* from `KnowsScreen`, which is what makes the
-  // observer's transition rule clear the caption rather than describe the screen.
-
-  // Controller Presets keeps its own instructions and draws no settings label.
-
+  // Calibration and Controller Presets draw their instructions in the guest UI.
   return {};
 }
 

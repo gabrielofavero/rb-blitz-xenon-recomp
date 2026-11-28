@@ -2936,7 +2936,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           }
         }
       }
-      for (const auto& [key, text] : screen::Labels(portrait_interface)) {
+      for (const auto& [key, text] : screen::Labels()) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
             why != "the locale already has that key") {

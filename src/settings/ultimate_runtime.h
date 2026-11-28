@@ -183,28 +183,7 @@ inline std::string HelpSymbolForApplicationState(std::string_view symbol,
   const auto match = std::find_if(rows.begin(), rows.end(), [&](const auto& row) {
     return row.first == symbol;
   });
-  if (match == rows.end()) {
-    constexpr std::array<std::pair<std::string_view, SettingId>, 9> menu_rows{{
-        {"settings_show_messages", SettingId::kShowMessages},
-        {"settings_show_recommendations", SettingId::kShowRecommendations},
-        {"settings_mm_leaderboard", SettingId::kHiddenMainMenu},
-        {"settings_mm_achievements", SettingId::kHiddenMainMenu},
-        {"settings_mm_upgrade", SettingId::kHiddenMainMenu},
-        {"settings_mm_download_content", SettingId::kHideDownloadContent},
-        {"settings_dlc_refresh", SettingId::kRefreshMusicLibrary},
-        {"settings_play_current", SettingId::kPlayCurrentSong},
-        {"settings_mm_rhythmverse", SettingId::kHiddenMainMenu}}};
-    const auto menu = std::find_if(menu_rows.begin(), menu_rows.end(), [&](const auto& row) {
-      return row.first == symbol;
-    });
-    if (menu == menu_rows.end()) return std::string(symbol);
-    for (const FieldState& field : snapshot.fields) {
-      if (field.id == menu->second && field.application_phase == ApplyPhase::kDeferred &&
-          field.application_boundary == ApplyBoundary::kMenuReturn)
-        return std::string(symbol) + "_menu_return";
-    }
-    return std::string(symbol);
-  }
+  if (match == rows.end()) return std::string(symbol);
   for (const FieldState& field : snapshot.fields) {
     if (field.id == match->second && field.application_phase == ApplyPhase::kDeferred &&
         field.application_boundary == ApplyBoundary::kNextSong)

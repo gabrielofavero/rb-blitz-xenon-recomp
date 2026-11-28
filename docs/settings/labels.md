@@ -1,172 +1,172 @@
 # Settings names and labels
 
-The table lists the English row names and their authored help captions in Help & Options. Names are shown before any current value, binding, or availability suffix. The rows and values offered can vary by platform, game edition, hardware, and installed content.
+The table lists the English row names and their authored help captions in Help & Options. Names are shown before any current value, binding, or availability suffix. The rows and values offered can vary by platform, game edition, hardware, and installed content. A dash indicates a row without an authored caption.
 
 | Page | Settings row | Help label |
 | --- | --- | --- |
-| Help & Options | Game | Startup, gameplay, and menu settings. |
-| Help & Options | Calibration | Sync audio and video with the notes. |
-| Help & Options | Controls | Set controller, key, and touch inputs. |
-| Help & Options | Audio / Video | Adjust sound and picture. |
-| Help & Options | How to Play | Learn how to play. |
-| Help & Options | Credits | View the credits. |
-| Game | Startup | Set game version, boot, and loading. |
-| Game | Achievements & Unlocks | Set unlocks and achievement popups. |
-| Game | Gameplay | Set HUD, camera, and scenery. |
-| Game | Menus & Prompts | Set shortcuts, tabs, and prompts. |
-| Game | Extra Features | Set store and music options. |
-| Game | Restore Settings | Reset settings and inputs. Restart. |
-| Game → Startup | Game Version | Choose Blitz, Ultimate, or Demo. |
-| Game → Startup | Fast Boot | Skip logos and 'Press A to Start'. |
-| Game → Startup | DLC Loading Threads | Use more threads for faster DLC scans. |
-| Game → Startup | Song Load Timeout | Timeout may lose unsaved progress. |
-| Startup → Game Version | Rock Band Blitz | Start the base Rock Band Blitz. |
-| Startup → Game Version | Rock Band Blitz Ultimate | Start Blitz with the Ultimate mod. |
-| Startup → Game Version | Rock Band Blitz Demo | Start the Rock Band Blitz demo. |
-| Game → Achievements & Unlocks | Unlock All | Unlock all content. |
-| Game → Achievements & Unlocks | Unlock Online Achievements | Unlock online-only achievements. |
-| Game → Achievements & Unlocks | Show Achievements | Toggle popups; progress is saved. |
-| Game → Gameplay | Camera Angle | Set camera height. |
-| Game → Gameplay | Game Speed | Play songs faster. |
-| Game → Gameplay | HUD | Choose visible gameplay displays. |
-| Game → Gameplay | Tracks & Gems | Set note and track appearance. |
-| Game → Gameplay | Scenery | Choose scenery behind the track. |
-| Gameplay → HUD | All HUD Elements | Hide all gameplay displays. |
-| Gameplay → HUD | Score Goals | Choose score comparisons and goals. |
-| Gameplay → HUD | Song Progress | Show song progress and time. |
-| Gameplay → HUD | Player Feedback | Show streak and input feedback. |
-| HUD → Score Goals | Run Comparison | Show the right-side score comparison. Restart. |
-| HUD → Score Goals | Gold Star Progress | Show gold-star progress. |
-| HUD → Score Goals | Personal Best | Show best-score goal. |
-| HUD → Song Progress | Song Progress Bar | Show song progress. |
-| HUD → Song Progress | Timer | Show the elapsed song time. |
-| HUD → Player Feedback | Note Streak | Show note streak. |
-| HUD → Player Feedback | Input Viewer | Show live controller inputs. |
-| Gameplay → Tracks & Gems | Precision Mode | Show note timing more precisely. |
-| Gameplay → Tracks & Gems | Stop Track Wiggles | Stop random track and note wobble. |
-| Gameplay → Tracks & Gems | Gems | Choose note style. |
-| Gameplay → Scenery | Disable Plots | Remove scenery behind the tracks. |
-| Gameplay → Scenery | Force Plot | Override the song scenery. |
-| Gameplay → Scenery | Force Skybox | Force a sky, or remove it entirely. |
-| Game → Menus & Prompts | Main Menu | Choose visible menu shortcuts. |
-| Game → Menus & Prompts | Library Display | Library tabs and currency balances. |
-| Game → Menus & Prompts | Settings Labels | Show and size settings help text. |
-| Game → Menus & Prompts | Skip Offline Prompts | Skip offline connection prompts. |
-| Menus & Prompts → Main Menu | Refresh Songs | Show song rescan. |
-| Menus & Prompts → Main Menu | Download Content | Full game: show DLC. |
-| Menus & Prompts → Main Menu | Leaderboards | Show Leaderboards. |
-| Menus & Prompts → Main Menu | Achievements | Show achievements shortcut. |
-| Menus & Prompts → Main Menu | Exit Game | Show Exit Game. |
-| Menus & Prompts → Main Menu | Unlock Full Game | Show upgrade; Demo only. |
-| Menus & Prompts → Library Display | Messages | Show MESSAGES tab. Restart. |
-| Menus & Prompts → Library Display | Recommendations | RECOMMENDED tab. Restart. |
-| Menus & Prompts → Library Display | Coins & Blitz Cred | Show currency totals. Restart. |
-| Menus & Prompts → Settings Labels | Enabled | Show help for the selected setting. |
-| Menus & Prompts → Settings Labels | Size | Set help text size. |
-| Game → Extra Features | RhythmVerse | Set store access and song filters. |
-| Game → Extra Features | Background Music | Set music source, player, and inputs. |
-| Extra Features → RhythmVerse | Store Access | Get custom songs. |
-| Extra Features → RhythmVerse | Main Menu Shortcut | Show store shortcut. |
-| Extra Features → RhythmVerse | Filters | Require charts for chosen instruments. |
-| RhythmVerse → Filters | Guitar | Require a guitar chart. |
-| RhythmVerse → Filters | Bass | Require a bass chart. |
-| RhythmVerse → Filters | Drums | Require a drum chart. |
-| RhythmVerse → Filters | Vocals | Require a vocal chart. |
-| RhythmVerse → Filters | Keys | Require a keys chart. |
-| Extra Features → Background Music | Music Source | Use default or library music. Restart. |
-| Extra Features → Background Music | Music Player | Show library player. Restart. |
-| Extra Features → Background Music | Menu Music Navigation | Use music controls. Restart. |
-| Extra Features → Background Music | Play Current Song | Show song shortcut. |
-| Game → Restore Settings | Recommended Settings | Reset to defaults. Restart. |
-| Game → Restore Settings | Vanilla Settings | Reset to classic Blitz. Restart. |
-| Restore Settings → Either profile | Cancel | Keep your settings. |
-| Restore Settings → Either profile | Apply Settings | Save profile; restart to apply. |
-| Controls | Layout | Choose a controller layout. |
-| Controls | Controller Presets | Presets need default pad bindings. |
-| Controls | Menu Bindings | Set menu and pause-menu inputs. |
-| Controls | Gameplay Bindings | Set note, lane, pause, and power-up inputs. |
-| Controls | Touch | Set touch and motion controls. |
-| Controls → Layout | Xbox | Choose a layout to apply it. |
-| Controls → Layout | PlayStation | Choose a layout to apply it. |
-| Controls → Layout | Nintendo Switch | Choose a layout to apply it. |
-| Controls → Layout | Others | Choose a layout to apply it. |
-| Controls → Layout → Xbox | Xbox 360, Xbox Series | Apply a layout; * marks current. |
-| Controls → Layout → PlayStation | PlayStation 3, PlayStation 4, PlayStation 5 | Apply a layout; * marks current. |
-| Controls → Layout → Nintendo Switch | Switch 2 Joy-Con, Switch 2 Pro, Switch Joy-Con, Switch Pro | Apply a layout; * marks current. |
-| Controls → Layout → Others | Meta Quest 2, Meta Quest 3, Steam Deck | Apply a layout; * marks current. |
-| Controls → Layout → Matching group | User-installed layout name | Apply a layout; * marks current. |
-| Controls → Layout → Empty group | No layouts installed | No layouts in this group. |
-| Controls → Layout → Paginated group | More... | Show more options in this category. |
-| Controls → Menu Bindings | Navigation | Set menu direction inputs. |
-| Controls → Menu Bindings | Confirm | Confirm a selection. |
-| Controls → Menu Bindings | Go Back | Go back or cancel. |
-| Controls → Menu Bindings | Music Library Options | Set song library inputs. |
-| Controls → Menu Bindings | Background Music Play | Set menu music playback inputs. |
-| Controls → Menu Bindings | Reset All | Reset all menu inputs. |
-| Menu Bindings → Navigation | Up | Move the interface's selection up. |
-| Menu Bindings → Navigation | Down | Move the interface's selection down. |
-| Menu Bindings → Navigation | Left | Move the interface's selection left. |
-| Menu Bindings → Navigation | Right | Move the interface's selection right. |
-| Menu Bindings → Music Library Options | Search | Open the song list's own search box. |
-| Menu Bindings → Music Library Options | Shortcuts | Open the song list's shortcuts. |
-| Menu Bindings → Music Library Options | Sort | Change how the song list is sorted. |
-| Menu Bindings → Music Library Options | Previous Header | Move to the previous library header. |
-| Menu Bindings → Music Library Options | Next Header | Move to the next library header. |
-| Menu Bindings → Background Music Play | Next Track | Skip to the next menu track. |
-| Menu Bindings → Background Music Play | Previous Track | Restart after 5s; else play the prior track. |
-| Menu Bindings → Background Music Play | Play/Pause | Pause or resume menu music. |
-| Menu Bindings → Individual binding, except music playback | Add Key | Press a key or button to add it. |
-| Menu Bindings → Individual binding, except music playback | Replace | Press a key or button to replace all inputs. |
-| Menu Bindings → Individual binding, except music playback | Reset | Restore the default inputs. |
-| Background Music Play → Individual binding | Add Key | Add a key or button. |
-| Background Music Play → Individual binding | Replace | Replace all inputs with a key or button. |
-| Background Music Play → Individual binding | Reset | Reset pad and media key inputs. |
-| Controls → Gameplay Bindings | Notes | Set inputs for both notes. |
-| Controls → Gameplay Bindings | Move Lane | Set left and right lane inputs. |
-| Controls → Gameplay Bindings | Pause & Power-up | Set pause and power-up inputs. |
-| Controls → Gameplay Bindings | Reset All | Reset inputs and pad presets. |
-| Gameplay Bindings → Notes | First Note | Assign or reset inputs. |
-| Gameplay Bindings → Notes | Second Note | Assign or reset inputs. |
-| Gameplay Bindings → Move Lane | Move Right | Assign or reset inputs. |
-| Gameplay Bindings → Move Lane | Move Left | Assign or reset inputs. |
-| Gameplay Bindings → Pause & Power-up | Pause | Assign or reset inputs. |
-| Gameplay Bindings → Pause & Power-up | Power-up | Assign or reset inputs. |
-| Gameplay Bindings → Individual binding | Add Key | Add a key, mouse, or pad input. |
-| Gameplay Bindings → Individual binding | Replace | Press a key or button to replace all inputs. |
-| Gameplay Bindings → Individual binding | Reset | Reset keys and pad preset. |
-| Controls → Touch | Pause Button | Show the touch pause button. |
-| Controls → Touch | Lane Swipe | Reverse lane swipes with Inverted. |
-| Controls → Touch | Motion Deploy | Tilt or shake to deploy; None stops it. |
-| Audio / Video | Audio | Adjust track, effects, and bass volume. |
-| Audio / Video | Video | Display and graphics settings. |
-| Audio / Video → Audio | Active Track Boost | Boost the active track volume. |
-| Audio / Video → Audio | Sound Effects Volume | Adjust sound effects volume. |
-| Audio / Video → Audio | Bass Boost | Add extra bass to the mix. |
-| Audio / Video → Video | Display | Set screen size, rotation, and V-Sync. |
-| Audio / Video → Video | Graphics | Set smoothing, textures, and effects. |
-| Video → Display | Resolution | Set menu and gameplay resolutions. |
-| Video → Display | Render Scale | Scale menu and gameplay detail. |
-| Video → Display | Window Mode | Set how the window fills the screen. |
-| Video → Display | Orientation | Set menu and gameplay orientation. |
-| Video → Display | V-Sync | Prevent screen tearing. |
-| Video → Display | Overscan | Fill the screen to its edges. |
-| Display → Resolution | Interface | Set menu detail; upgrades may need restart. |
-| Display → Resolution | Gameplay | Set gameplay detail; upgrades may restart. |
-| Display → Resolution | Force 16:9 | Use 16:9 resolutions. Restart. |
-| Display → Render Scale | Interface | 1.0 is native device pixels; may need restart. |
-| Display → Render Scale | Gameplay | 1.0 is native device pixels; may need restart. |
-| Display → Orientation | Interface | Set menu orientation. Restart. |
-| Display → Orientation | Gameplay | Rotate gameplay and HUD. Restart. |
-| Video → Graphics | Anti-Aliasing | Smooth edges; may reduce speed. |
-| Video → Graphics | Texture Filtering | Sharpen textures; may reduce speed. |
-| Video → Graphics | Depth of Field | Blur distant scenery. |
-| Video → Graphics | Renderer | Set graphics backend. Restart. |
-| Graphics → Anti-Aliasing | None | Fastest; leaves jagged edges. |
-| Graphics → Anti-Aliasing | Native (2x) | Built-in 2x smoothing; balanced speed. |
-| Graphics → Anti-Aliasing | FXAA | Fast smoothing; softens fine detail. |
-| Graphics → Anti-Aliasing | FXAA Extreme | Stronger smoothing; softer detail. |
-| How to Play | Basic Tutorial | Learn the basics of Rock Band Blitz. |
-| How to Play | Advanced Tutorial | Advanced techniques for higher scores. |
+| Help & Options | Game | - |
+| Help & Options | Calibration | - |
+| Help & Options | Controls | - |
+| Help & Options | Audio / Video | - |
+| Help & Options | How to Play | - |
+| Help & Options | Credits | - |
+| Game | Startup | Set game version, boot settings, and loading screens |
+| Game | Achievements & Unlocks | Unlock content and manage achievement notifications |
+| Game | Gameplay | Set HUD, camera, and scenery effects |
+| Game | Menus & Prompts | Customize the main menu and how it behaves |
+| Game | Extra Features | Configure extra features added by this project |
+| Game | Restore Settings | Quick setting presets for restoring default behaviors |
+| Game → Startup | Game Version | - |
+| Game → Startup | Fast Boot | Skip splash screens and the button press at startup |
+| Game → Startup | DLC Loading Threads | Use more threads for faster DLC scans |
+| Game → Startup | Song Load Timeout | Prevent bad DLC from soft-locking the game during song loads |
+| Startup → Game Version | Rock Band Blitz | The base game experience |
+| Startup → Game Version | Rock Band Blitz Ultimate | Fan-made mod with many gameplay enhancements |
+| Startup → Game Version | Rock Band Blitz Demo | The trial mode experience |
+| Game → Achievements & Unlocks | Unlock All | Unlock all content, such as power-ups |
+| Game → Achievements & Unlocks | Unlock Online Achievements | Unlock online-only achievements that can no longer be earned |
+| Game → Achievements & Unlocks | Show Achievements | Choose whether to get notified when you earn an achievement |
+| Game → Gameplay | Camera Angle | - |
+| Game → Gameplay | Game Speed | - |
+| Game → Gameplay | HUD | Choose which gameplay HUD elements to display |
+| Game → Gameplay | Tracks & Gems | Set note and track appearance |
+| Game → Gameplay | Scenery | Choose scenery behind the track |
+| Gameplay → HUD | All HUD Elements | Master toggle for hiding the entire gameplay HUD |
+| Gameplay → HUD | Score Goals | HUD elements about your score and stars |
+| Gameplay → HUD | Song Progress | HUD elements that show how much time is left in the song |
+| Gameplay → HUD | Player Feedback | HUD elements about note streaks and input |
+| HUD → Score Goals | Run Comparison | Compare your current run with your previous score in real time |
+| HUD → Score Goals | Gold Star Progress | Show how close you are to earning gold stars |
+| HUD → Score Goals | Personal Best | - |
+| HUD → Song Progress | Song Progress Bar | A long bar that fills as the song plays |
+| HUD → Song Progress | Timer | A small "MM:SS / MM:SS" label that shows song progress |
+| HUD → Player Feedback | Note Streak | Show how many notes you've hit in a row |
+| HUD → Player Feedback | Input Viewer | Show live controller inputs |
+| Gameplay → Tracks & Gems | Precision Mode | Show note timing more precisely |
+| Gameplay → Tracks & Gems | Stop Track Wiggles | Stop random track and note wobble |
+| Gameplay → Tracks & Gems | Gems | Choose note style |
+| Gameplay → Scenery | Disable Plots | Remove scenery behind the tracks, which can greatly improve performance |
+| Gameplay → Scenery | Force Plot | Override the song scenery |
+| Gameplay → Scenery | Force Skybox | Force a sky, or remove it entirely |
+| Game → Menus & Prompts | Main Menu | Choose which main menu options to show |
+| Game → Menus & Prompts | Library Display | Choose which headers to show in your music library |
+| Game → Menus & Prompts | Settings Labels | Choose whether and how to show captions like this one |
+| Game → Menus & Prompts | Skip Offline Prompts | Skip repeated offline mode warnings at startup |
+| Menus & Prompts → Main Menu | Refresh Songs | Rescan your DLC from the main menu without backing out |
+| Menus & Prompts → Main Menu | Download Content | Legacy Rock Band Blitz store. Defunct |
+| Menus & Prompts → Main Menu | Leaderboards | Legacy Rock Band Blitz leaderboards. Defunct |
+| Menus & Prompts → Main Menu | Achievements | A panel with all available achievements |
+| Menus & Prompts → Main Menu | Exit Game | - |
+| Menus & Prompts → Main Menu | Unlock Full Game | Legacy prompt to buy the full game. Defunct |
+| Menus & Prompts → Library Display | Messages | In-game messages about the project status |
+| Menus & Prompts → Library Display | Recommendations | Song suggestions that used to include official store items. Partially defunct |
+| Menus & Prompts → Library Display | Coins & Blitz Cred | Currency from the game's online features. Defunct |
+| Menus & Prompts → Settings Labels | Enabled | Show captions like this one that describe settings |
+| Menus & Prompts → Settings Labels | Size | Choose the size of these captions |
+| Game → Extra Features | RhythmVerse | A massive custom song catalog that installs songs directly to your DLC folder |
+| Game → Extra Features | Background Music | Play a random song from your library in place of the default background music |
+| Extra Features → RhythmVerse | Store Access | - |
+| Extra Features → RhythmVerse | Main Menu Shortcut | If disabled, you can still open the store from the My Songs header |
+| Extra Features → RhythmVerse | Filters | Choose which instrument charts songs must have to appear in results |
+| RhythmVerse → Filters | Guitar | Hide songs without a guitar chart if set to Required |
+| RhythmVerse → Filters | Bass | Hide songs without a bass chart if set to Required |
+| RhythmVerse → Filters | Drums | Hide songs without a drums chart if set to Required |
+| RhythmVerse → Filters | Vocals | Hide songs without a vocals chart if set to Required |
+| RhythmVerse → Filters | Keys | Hide songs without a keys chart if set to Required |
+| Extra Features → Background Music | Music Source | Use default or library music |
+| Extra Features → Background Music | Music Player | See and switch the current song when library music is enabled |
+| Extra Features → Background Music | Menu Music Navigation | Switch or pause library or default music with your controller or keyboard |
+| Extra Features → Background Music | Play Current Song | Jump straight to the currently playing background song in your library |
+| Game → Restore Settings | Recommended Settings | Restore your settings to the defaults |
+| Game → Restore Settings | Vanilla Settings | Use settings that give you the closest experience to vanilla Rock Band Blitz |
+| Restore Settings → Either profile | Cancel | - |
+| Restore Settings → Either profile | Apply Settings | - |
+| Controls | Layout | Choose the visuals that represent your input type |
+| Controls | Controller Presets | Predefined configurations for controller inputs |
+| Controls | Menu Bindings | Customize the inputs to navigate the interface |
+| Controls | Gameplay Bindings | Customize gameplay inputs, which disables controller presets by default |
+| Controls | Touch | Set touch and motion controls |
+| Controls → Layout | Xbox | - |
+| Controls → Layout | PlayStation | - |
+| Controls → Layout | Nintendo Switch | - |
+| Controls → Layout | Others | Handhelds and VR |
+| Controls → Layout → Xbox | Xbox 360, Xbox Series | - |
+| Controls → Layout → PlayStation | PlayStation 3, PlayStation 4, PlayStation 5 | - |
+| Controls → Layout → Nintendo Switch | Switch 2 Joy-Con, Switch 2 Pro, Switch Joy-Con, Switch Pro | - |
+| Controls → Layout → Others | Meta Quest 2, Meta Quest 3, Steam Deck | - |
+| Controls → Layout → Matching group | User-installed layout name | - |
+| Controls → Layout → Empty group | No layouts installed | - |
+| Controls → Layout → Paginated group | More... | - |
+| Controls → Menu Bindings | Navigation | Up, down, left, and right |
+| Controls → Menu Bindings | Confirm | - |
+| Controls → Menu Bindings | Go Back | - |
+| Controls → Menu Bindings | Music Library Options | - |
+| Controls → Menu Bindings | Background Music Play | Play, pause, or skip tracks in the background music |
+| Controls → Menu Bindings | Reset All | Reset all menu inputs to the defaults |
+| Menu Bindings → Navigation | Up | - |
+| Menu Bindings → Navigation | Down | - |
+| Menu Bindings → Navigation | Left | - |
+| Menu Bindings → Navigation | Right | - |
+| Menu Bindings → Music Library Options | Search | Only available on Rock Band Blitz Ultimate |
+| Menu Bindings → Music Library Options | Shortcuts | - |
+| Menu Bindings → Music Library Options | Sort | - |
+| Menu Bindings → Music Library Options | Previous Header | - |
+| Menu Bindings → Music Library Options | Next Header | - |
+| Menu Bindings → Background Music Play | Next Track | - |
+| Menu Bindings → Background Music Play | Previous Track | - |
+| Menu Bindings → Background Music Play | Play/Pause | - |
+| Menu Bindings → Individual binding, except music playback | Add Key | Press a key or button to add it |
+| Menu Bindings → Individual binding, except music playback | Replace | Press a key or button to replace all inputs |
+| Menu Bindings → Individual binding, except music playback | Reset | Restore all keys to the default inputs |
+| Background Music Play → Individual binding | Add Key | Press a key or button to add it |
+| Background Music Play → Individual binding | Replace | Press a key or button to replace all inputs |
+| Background Music Play → Individual binding | Reset | Restore all keys to the default inputs |
+| Controls → Gameplay Bindings | Notes | Controls for hitting notes in the current lane |
+| Controls → Gameplay Bindings | Move Lane | Move to the next or previous lane |
+| Controls → Gameplay Bindings | Pause & Power-up | - |
+| Controls → Gameplay Bindings | Reset All | Restore all keys to the default inputs |
+| Gameplay Bindings → Notes | First Note | - |
+| Gameplay Bindings → Notes | Second Note | - |
+| Gameplay Bindings → Move Lane | Move Right | - |
+| Gameplay Bindings → Move Lane | Move Left | - |
+| Gameplay Bindings → Pause & Power-up | Pause | - |
+| Gameplay Bindings → Pause & Power-up | Power-up | - |
+| Gameplay Bindings → Individual binding | Add Key | Add a key, mouse, or pad input |
+| Gameplay Bindings → Individual binding | Replace | Press a key or button to replace all inputs |
+| Gameplay Bindings → Individual binding | Reset | Reset keys and pad preset |
+| Controls → Touch | Pause Button | Show the touch pause button |
+| Controls → Touch | Lane Swipe | Reverse lane swipes with Inverted |
+| Controls → Touch | Motion Deploy | Tilt or shake to deploy a power-up, or choose None to disable it |
+| Audio / Video | Audio | Adjust track, effects, and bass volume |
+| Audio / Video | Video | Display and graphics settings |
+| Audio / Video → Audio | Active Track Boost | Boost the active track volume |
+| Audio / Video → Audio | Sound Effects Volume | Adjust sound effects volume |
+| Audio / Video → Audio | Bass Boost | Add extra bass to the mix |
+| Audio / Video → Video | Display | Set screen size, rotation, and V-Sync |
+| Audio / Video → Video | Graphics | Set smoothing, textures, and effects |
+| Video → Display | Resolution | Set menu and gameplay resolutions |
+| Video → Display | Render Scale | Scale menu and gameplay detail |
+| Video → Display | Window Mode | Set how the window fills the screen |
+| Video → Display | Orientation | Set menu and gameplay orientation |
+| Video → Display | V-Sync | Prevent screen tearing |
+| Video → Display | Overscan | Fill the screen to its edges |
+| Display → Resolution | Interface | Set menu detail (higher resolutions may require a restart) |
+| Display → Resolution | Gameplay | Set gameplay detail (higher resolutions may require a restart) |
+| Display → Resolution | Force 16:9 | Use 16:9 resolutions (restart required) |
+| Display → Render Scale | Interface | 1.0 uses native device pixels and may require a restart |
+| Display → Render Scale | Gameplay | 1.0 uses native device pixels and may require a restart |
+| Display → Orientation | Interface | Set menu orientation (restart required) |
+| Display → Orientation | Gameplay | Rotate gameplay and HUD (restart required) |
+| Video → Graphics | Anti-Aliasing | Smooth edges at a possible performance cost |
+| Video → Graphics | Texture Filtering | Sharpen textures at a possible performance cost |
+| Video → Graphics | Depth of Field | Blur distant scenery |
+| Video → Graphics | Renderer | Set graphics backend (restart required) |
+| Graphics → Anti-Aliasing | None | Fastest option, with jagged edges |
+| Graphics → Anti-Aliasing | Native (2x) | Built-in 2x smoothing with balanced performance |
+| Graphics → Anti-Aliasing | FXAA | Fast smoothing that softens fine detail |
+| Graphics → Anti-Aliasing | FXAA Extreme | Stronger smoothing with softer detail |
+| How to Play | Basic Tutorial | Learn the basics of Rock Band Blitz |
+| How to Play | Advanced Tutorial | Advanced techniques for higher scores |
 
 Controls subpages and confirmation dialogs hide the help caption. The table includes their authored captions for reference. The native Calibration and Controller Presets screens draw their own instructions.
 
@@ -174,61 +174,43 @@ Controls subpages and confirmation dialogs hide the help caption. The table incl
 
 | Prompt | Row | Authored help label |
 | --- | --- | --- |
-| Confirm online achievement unlocks | Close | Close this message. |
-| Confirm online achievement unlocks | Unlock Online Achievements | Grant online awards permanently. |
-| Confirm window mode | Revert | Restore the previous window mode. |
-| Confirm window mode | Keep | Save this window mode. |
-| Confirm related settings | Cancel | Keep the current settings. |
-| Confirm related settings | Confirm | Save this and related settings. |
-| Confirm custom controller inputs | Cancel | Keep controller presets active. |
-| Confirm custom controller inputs | Continue | Switch to custom controller inputs. |
-| Input capture | Listening for input | Press an input before time runs out. |
-| Restart prompt | Ignore and Continue | Apply saved changes on a later restart. |
-| Restart prompt | Restart now | Restart to apply saved changes. |
-| Save error or unavailable current song | Close | Close this message. |
-
-## Portrait row names
-
-These shorter names use the same help labels as their full names.
-
-| Full name | Portrait name |
-| --- | --- |
-| Achievements & Unlocks | Unlocks |
-| Unlock Online Achievements | Unlock Online Ac. |
-| Download Content | Download Cont. |
-| Unlock Full Game | Unlock Game |
-| Main Menu Shortcut | Shortcut |
-| Gold Star Progress | Star Progress |
-| Song Progress Bar | Progress Bar |
-| Force Skybox | Skybox |
-| Force Plot | Plot |
-| Background Music Play | Music Playback |
-| Music Library Options | Library Options |
-| Menu Music Navigation | Music Navigation |
-| DLC Loading Threads | Loading Threads |
+| Confirm online achievement unlocks | Close | Close this message |
+| Confirm online achievement unlocks | Unlock Online Achievements | Grant online awards permanently |
+| Confirm window mode | Revert | Restore the previous window mode |
+| Confirm window mode | Keep | Save this window mode |
+| Confirm related settings | Cancel | Keep the current settings |
+| Confirm related settings | Confirm | Save this and related settings |
+| Confirm custom controller inputs | Cancel | Keep controller presets active |
+| Confirm custom controller inputs | Continue | Switch to custom controller inputs |
+| Input capture | Listening for input | Press an input before time runs out |
+| Restart prompt | Ignore and Continue | Apply saved changes on a later restart |
+| Restart prompt | Restart now | Restart to apply saved changes |
+| Save error or unavailable current song | Close | Close this message |
 
 ## Captions for pending changes
 
-| Settings row | Help label while pending |
-| --- | --- |
-| Personal Best | Show best-score goal. Next song pick. |
-| All HUD Elements | Hide all gameplay displays. Next song. |
-| Song Progress Bar | Show song progress. Next song. |
-| Timer | Show the elapsed song time. Next song. |
-| Note Streak | Show note streak. Next song. |
-| Input Viewer | Show live controller inputs. Next song. |
-| Camera Angle | Set camera height. Next song. |
-| Gems | Choose note style. Next song. |
-| Messages | Show MESSAGES tab. At main menu. |
-| Recommendations | RECOMMENDED tab. At main menu. |
-| Leaderboards | Show Leaderboards. At main menu. |
-| Achievements | Show achievements shortcut. At main menu. |
-| Unlock Full Game | Show upgrade; Demo only. At main menu. |
-| Download Content | Full game: show DLC. At main menu. |
-| Refresh Songs | Show song rescan. At main menu. |
-| Play Current Song | Show song shortcut. At main menu. |
-| Main Menu Shortcut (RhythmVerse) | Show store shortcut. At main menu. |
+The timing text follows the usual caption when one is available. A dash means no timing text is added.
 
-Unavailable settings can show `Unavailable: <reason>.` in place of their usual help label.
+| Settings row | Text added while pending |
+| --- | --- |
+| Personal Best | Applies on the next song pick |
+| All HUD Elements | Applies on the next song you play |
+| Song Progress Bar | Applies on the next song you play |
+| Timer | Applies on the next song you play |
+| Note Streak | Applies on the next song you play |
+| Input Viewer | Applies on the next song you play |
+| Camera Angle | Applies on the next song you play |
+| Gems | Applies on the next song you play |
+| Messages | - |
+| Recommendations | - |
+| Leaderboards | - |
+| Achievements | - |
+| Unlock Full Game | - |
+| Download Content | - |
+| Refresh Songs | - |
+| Play Current Song | - |
+| Main Menu Shortcut (RhythmVerse) | - |
+
+Unavailable settings can show `Unavailable: <reason>` in place of their usual help label.
 
 Sources include the settings menu, native help topics, pending-change rules, and controller layout manifests. [Settings menu](../../src/ui/settings_screen.cpp) · [Native help topics](../../src/ui/help_topics.cpp) · [Pending-change rules](../../src/settings/ultimate_runtime.h) · [Controller layouts](../../assets/controller/)

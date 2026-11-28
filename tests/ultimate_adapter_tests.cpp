@@ -390,9 +390,6 @@ void TestRuntimeCommands() {
     field.application_phase = rb_blitz::settings::ApplyPhase::kDeferred;
     snapshot.fields[0] = field;
     CHECK_TRUE(HelpSymbolForApplicationState("settings_show_messages", snapshot) ==
-               "settings_show_messages_menu_return");
-    snapshot.fields[0].application_phase = rb_blitz::settings::ApplyPhase::kFailed;
-    CHECK_TRUE(HelpSymbolForApplicationState("settings_show_messages", snapshot) ==
                "settings_show_messages");
     snapshot.fields[0].id = SettingId::kShowTimer;
     snapshot.fields[0].application_boundary = rb_blitz::settings::ApplyBoundary::kNextSong;

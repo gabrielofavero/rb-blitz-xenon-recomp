@@ -2279,58 +2279,30 @@ void TestSaveErrorSaysWhy() {
   }
 }
 
-void TestPortraitLabels() {
-  BeginCase("portrait settings shorten names while preserving keys, values and landscape labels");
+void TestSettingsLocaleLabels() {
+  BeginCase("settings reuse full locale names for rows, states and titles");
   MenuConfiguration configuration;
   configuration.download_content_row = true;
   for (const bool trial : {false, true}) {
     configuration.trial_mode = trial;
     ConfigureMenu(configuration);
-    const auto landscape = Labels(false);
-    const auto portrait = Labels(true);
-    CHECK_EQ(landscape.size(), portrait.size());
-    for (size_t i = 0; i < landscape.size(); ++i)
-      CHECK_TRUE(landscape[i].first == portrait[i].first);
-    const auto label = [](const auto& labels, const char* key) {
+    const auto labels = Labels();
+    const auto label = [&](std::string_view key) {
       for (const auto& entry : labels) if (entry.first == key) return entry.second;
       return std::string();
     };
-    CHECK_TRUE(label(landscape, "settings_title_settings_rhythmverse_filter_panel") ==
-               "RHYTHMVERSE FILTERS");
-    CHECK_TRUE(label(portrait, "settings_title_settings_rhythmverse_filter_panel") == "FILTERS");
-    for (const auto& labels : {landscape, portrait}) {
-      CHECK_TRUE(label(labels, "settings_rv_guitar_on") == "Guitar: Required");
-      CHECK_TRUE(label(labels, "settings_rv_guitar_off") == "Guitar: Optional");
-    }
-    CHECK_TRUE(label(portrait, "settings_achievements") == "Unlocks");
-    CHECK_TRUE(label(portrait, "settings_title_settings_achievements_panel") == "UNLOCKS");
-    CHECK_TRUE(label(portrait, "settings_title_settings_controller_layout_panel") == "LAYOUT");
-    CHECK_TRUE(label(portrait, "settings_unlock_online") == "Unlock Online Ac.");
-    CHECK_TRUE(label(portrait, "settings_earn_achievements") == "Unlock Online Ac.");
-    CHECK_TRUE(label(portrait, "settings_mm_rhythmverse_on") == "Shortcut: Hidden");
-    CHECK_TRUE(label(portrait, "settings_mm_rhythmverse_off") == "Shortcut: Visible");
-    CHECK_TRUE(label(portrait, "settings_hud_gold_on") == "Star Progress: Visible");
-    CHECK_TRUE(label(portrait, "settings_hud_gold_off") == "Star Progress: Hidden");
-    CHECK_TRUE(label(portrait, "settings_hud_progress_on") == "Progress Bar: Visible");
-    CHECK_TRUE(label(portrait, "settings_force_skybox_default") == "Skybox: Default");
-    CHECK_TRUE(label(portrait, "settings_force_plot_off") == "Plot: Off");
-    CHECK_TRUE(label(portrait, "settings_title_settings_interface_music_play_panel") == "MUSIC PLAYBACK");
-    CHECK_TRUE(label(portrait, "settings_title_settings_interface_music_library_panel") == "LIBRARY OPTIONS");
-    CHECK_TRUE(label(portrait, "settings_music_navigation_on") == "Music Navigation: On");
-    CHECK_TRUE(label(portrait, "settings_dlc_threads_4") == "Loading Threads: 4");
-    for (const auto& labels : {landscape, portrait}) {
-      CHECK_TRUE(label(labels, "settings_mm_achievements_on") == "Achievements: Hidden");
-      CHECK_TRUE(label(labels, "settings_mm_achievements_off") == "Achievements: Visible");
-      CHECK_TRUE(label(labels, kDownloadContentRow) == kDownloadContentLabel);
-    }
-    CHECK_TRUE(label(portrait, trial ? "settings_mm_download_content" : "settings_mm_download_content_off") ==
-               (trial ? "Download Cont.: Unavailable" : "Download Cont.: Visible"));
-    CHECK_TRUE(label(portrait, trial ? "settings_mm_upgrade_off" : "settings_mm_upgrade") ==
-               (trial ? "Unlock Game: Visible" : "Unlock Game: Unavailable"));
-    CHECK_TRUE(label(landscape, "settings_achievements") == "Achievements & Unlocks");
-    CHECK_TRUE(label(landscape, "settings_title_settings_controller_layout_panel") == "CONTROLLER LAYOUT");
-    CHECK_TRUE(label(landscape, "settings_mm_rhythmverse_off") == "Main Menu Shortcut: Visible");
-    CHECK_TRUE(Labels() == landscape);
+    CHECK_TRUE(label("settings_title_settings_rhythmverse_filter_panel") == "RHYTHMVERSE FILTERS");
+    CHECK_TRUE(label("settings_title_settings_controller_layout_panel") == "CONTROLLER LAYOUT");
+    CHECK_TRUE(label("settings_achievements") == "Achievements & Unlocks");
+    CHECK_TRUE(label("settings_unlock_online") == "Unlock Online Achievements");
+    CHECK_TRUE(label("settings_mm_rhythmverse_off") == "Main Menu Shortcut: Visible");
+    CHECK_TRUE(label("settings_hud_progress_on") == "Song Progress Bar: Visible");
+    CHECK_TRUE(label("settings_dlc_threads_4") == "DLC Loading Threads: 4");
+    CHECK_TRUE(label(kDownloadContentRow) == kDownloadContentLabel);
+    CHECK_TRUE(label(trial ? "settings_mm_download_content" : "settings_mm_download_content_off") ==
+               (trial ? "Download Content: Unavailable" : "Download Content: Visible"));
+    CHECK_TRUE(label(trial ? "settings_mm_upgrade_off" : "settings_mm_upgrade") ==
+               (trial ? "Unlock Full Game: Visible" : "Unlock Full Game: Unavailable"));
   }
   ConfigureMenu({});
 }
@@ -2950,29 +2922,18 @@ int DumpRecord(const char* in_path, const char* needle) {
 }
 
 // -------------------------------------------------------------------------------------------------
-// The help captions (owner request, 2026-10-13): every row carries a short description, the
-// definition publishes the highlighted row's symbol through the settings channel on entry and on
-// every move (and the hide on every way out), and the retail/screen table resolves the pages whose
-// DTA is not ours.
-// -------------------------------------------------------------------------------------------------
-
-void TestHelpTextsCoverEveryRow() {
-  BeginCase("every row of the surface carries a caption, and every caption fits the overlay");
+// The definition publishes selection symbols. Rows without authored captions resolve to empty.
+void TestHelpTextLimits() {
+  BeginCase("settings captions fit the text budget, including pending timing text");
 
   std::vector<std::string> symbols = HelpSymbols();
-  // Deferred changes add timing text to the caption shown during a song.
-  // Count that text too so it cannot undo the portrait wording budget.
   for (const char* symbol : {
            "settings_hud_pb_next_selection", "settings_hud_hide_next_song",
            "settings_hud_progress_next_song", "settings_hud_timer_next_song",
            "settings_hud_streak_next_song", "settings_hud_input_next_song",
-           "settings_camera_next_song", "settings_gems_next_song",
-           "settings_show_messages_menu_return", "settings_show_recommendations_menu_return",
-           "settings_mm_leaderboard_menu_return", "settings_mm_achievements_menu_return",
-           "settings_mm_upgrade_menu_return", "settings_mm_download_content_menu_return",
-           "settings_dlc_refresh_menu_return", "settings_play_current_menu_return",
-           "settings_mm_rhythmverse_menu_return"}) {
+           "settings_camera_next_song", "settings_gems_next_song"}) {
     symbols.emplace_back(symbol);
+    CHECK_TRUE(!HelpTextFor(symbol).empty());
   }
   CHECK_TRUE(symbols.size() > 60u);
   std::vector<std::string> seen;
@@ -2980,32 +2941,26 @@ void TestHelpTextsCoverEveryRow() {
     CHECK_TRUE(std::find(seen.begin(), seen.end(), symbol) == seen.end());
     seen.push_back(symbol);
     const std::string text = HelpTextFor(symbol);
-    CHECK_TRUE(!text.empty());
-    if (text.empty()) {
-      std::printf("         row %s has no caption\n", symbol.c_str());
-      continue;
-    }
-    // Keep the authored text compact for portrait captions; the renderer uses
-    // actual font metrics to fit smaller windows and larger text sizes.
-    if (text.size() > kMaxHelpTextChars) std::printf("         caption too long: %s (%zu)\n", std::string(symbol).c_str(), text.size());
+    if (text.size() > kMaxHelpTextChars)
+      std::printf("         caption too long: %s (%zu)\n", symbol.c_str(), text.size());
     CHECK_TRUE(text.size() <= kMaxHelpTextChars);
-    CHECK_TRUE(text.size() <= 48);
-    CHECK_TRUE(text.find('\n') == std::string::npos);
-    CHECK_TRUE(text.back() == '.');
-    for (const char c : text) {
-      CHECK_TRUE(static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) < 0x7F);
+    CHECK_TRUE(!text.ends_with('.') && text.find('!') == std::string::npos);
+    for (const unsigned char c : text) {
+      CHECK_TRUE(c >= 0x20 && c < 0x7F);
     }
   }
 
-  // An unknown symbol has no text - the overlay treats empty as "nothing to show", so a row that
-  // somehow never got one degrades to no caption rather than a wrong one.
-  CHECK_TRUE(HelpTextFor("no_such_row").empty());
-  CHECK_TRUE(HelpTextFor("").empty());
-
-  // Spot checks that a caption is the one authored for the row, including two retail rows the
-  // merge adopts (their text is still ours; the locale only owns their labels) and a provider row.
-  CHECK_TRUE(HelpTextFor("controls").find("controller") != std::string::npos);
-  CHECK_TRUE(HelpTextFor("calibration").find("audio") != std::string::npos);
+  for (const char* symbol : {"settings_general", "calibration", "controls", "audio_video_options",
+                             "tutorial", "credits", "settings_target", "settings_camera",
+                             "settings_speed", "settings_hud_pb", "settings_mm_exit",
+                             "settings_rhythmverse", "settings_restore_cancel",
+                             "settings_restore_recommended_confirm", "settings_restore_vanilla_confirm",
+                             "settings_layout_xbox", "settings_layout_playstation",
+                             "settings_layout_nintendo", "settings_layout_choice_retail",
+                             "settings_layout_empty_playstation", "no_such_row", ""}) {
+    CHECK_TRUE(HelpTextFor(symbol).empty());
+  }
+  CHECK_TRUE(HelpTextFor("settings_layout_others") == "Handhelds and VR");
   CHECK_TRUE(HelpTextFor("settings_gameplay").find("HUD") != std::string::npos);
   CHECK_TRUE(HelpTextFor("settings_vsync").find("tearing") != std::string::npos);
 }
@@ -3025,10 +2980,11 @@ bool IsHelpPath(const std::string& text, std::string* symbol) {
 }
 
 void TestHelpEventsInTheDefinition() {
-  BeginCase("the definition publishes a caption on entry, every move and every scroll, and the hide "
+  BeginCase("the definition publishes the selection on entry, every move and every scroll, and the hide "
             "on leave");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
+  const auto help_symbols = HelpSymbols();
   int panels = 0;
   int enters = 0;
   int moves = 0;
@@ -3080,7 +3036,7 @@ void TestHelpEventsInTheDefinition() {
           // The gate world with no visible row: an empty page has no first row to describe.
         } else {
           ++named;
-          CHECK_TRUE(!HelpTextFor(symbol).empty());
+          CHECK_TRUE(std::ranges::find(help_symbols, symbol) != help_symbols.end());
         }
       }
     }
@@ -3149,7 +3105,7 @@ void TestHelpEventsInTheDefinition() {
           }
           ++writes;
           CHECK_TRUE(symbol != "-");
-          CHECK_TRUE(!HelpTextFor(symbol).empty());
+          CHECK_TRUE(std::ranges::find(help_symbols, symbol) != help_symbols.end());
         }
         CHECK_EQ(writes, 1);
       }
@@ -3192,7 +3148,7 @@ void TestHelpEventsInTheDefinition() {
                 CHECK_TRUE(symbol == "-");
               } else {
                 CHECK_TRUE(symbol != "-");
-                CHECK_TRUE(!HelpTextFor(symbol).empty());
+                CHECK_TRUE(std::ranges::find(help_symbols, symbol) != help_symbols.end());
               }
             }
             CHECK_EQ(writes, 1);
@@ -3233,7 +3189,7 @@ void TestHelpTopicsResolve() {
     CHECK_TRUE(!text.empty());
     if (text.size() > kMaxHelpTextChars) std::printf("         caption too long: %s (%zu)\n", std::string(symbol).c_str(), text.size());
     CHECK_TRUE(text.size() <= kMaxHelpTextChars);
-    CHECK_TRUE(text.size() <= 48);
+    CHECK_TRUE(!text.ends_with('.') && text.find('!') == std::string::npos);
   }
   CHECK_TRUE(TextForSymbol("no_such_row").empty());
 
@@ -3275,11 +3231,9 @@ void TestHelpTopicsResolve() {
   CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 1, false}) ==
              TextForSymbol("tutorialsong3"));
   CHECK_TRUE(CaptionFor({"tutorials_screen", "options.lst", 2, false}).empty());
-  // Calibration is deliberately caption-free (owner request, 2026-10-14): its own screens draw the
-  // wizard's instructions and prompts, so neither the resolver nor the observer's transition rule
-  // may describe it. The root row that opens it still carries its caption.
+  // Calibration draws its own instructions and prompts.
   CHECK_TRUE(CaptionFor({"cal_welcome_screen", "", -1, false}).empty());
-  CHECK_TRUE(!HelpTextFor("calibration").empty());
+  CHECK_TRUE(HelpTextFor("calibration").empty());
   CHECK_TRUE(CaptionFor({"controller_config_screen", "", -1, false}).empty());
   CHECK_TRUE(CaptionFor({"controller_config_pause_screen", "", -1, false}).empty());
   CHECK_FALSE(KnowsScreen("controller_config_screen"));
@@ -3483,9 +3437,9 @@ void TestShowHeadersRow() {
     CHECK_TRUE(key != "settings_show_headers_on" && key != "settings_show_headers_off");
   }
   CHECK_EQ(states, 4);
-  CHECK_TRUE(std::string(HelpTextFor("settings_show_messages")).find("MESSAGES") != std::string::npos);
-  CHECK_TRUE(std::string(HelpTextFor("settings_show_recommendations")).find("RECOMMENDED") != std::string::npos);
-  CHECK_TRUE(std::string(HelpTextFor("settings_show_currency")).find("currency") != std::string::npos);
+  CHECK_TRUE(std::string(HelpTextFor("settings_show_messages")).find("project status") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_show_recommendations").ends_with(". Partially defunct"));
+  CHECK_TRUE(HelpTextFor("settings_show_currency").ends_with(". Defunct"));
   const auto* currency = rb_blitz::settings::schema::FindRow(rb_blitz::settings::SettingId::kShowCurrency);
   CHECK_TRUE(currency && !currency->descriptor.compiled_default.boolean &&
              currency->storage.section == "interface" && currency->storage.key == "show_currency");
@@ -3583,7 +3537,7 @@ void TestLaunchSurface() {
   CHECK_TRUE(std::any_of(labels.begin(), labels.end(), [](const auto& entry) {
     return entry.second == "Game Version";
   }));
-  CHECK_TRUE(HelpTextFor("settings_startup").find("Press A to Start") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_startup").find("button press") != std::string::npos);
 }
 
 void TestLoadGuardSurface() {
@@ -3793,7 +3747,7 @@ void TestAchievementActionWording() {
   CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
   CHECK_TRUE(label_for("settings_hide_achievements_on") == "Show Achievements: On");
   CHECK_TRUE(label_for("settings_hide_achievements_off") == "Show Achievements: Off");
-  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("progress is saved") !=
+  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("notified") !=
              std::string::npos);
 
   // The row's own caption still says what the grant does, and no surface spells the old wording.
@@ -4014,7 +3968,7 @@ void TestResolutionProfileRows() {
   }
   ConfigureMenu({});
   CHECK_TRUE(HelpTextFor("settings_force_16_by_9") ==
-             "Use 16:9 resolutions. Restart.");
+             "Use 16:9 resolutions (restart required)");
 }
 
 // A backend row lists what this build and this machine can run: the payload fills
@@ -5057,18 +5011,11 @@ void TestUltimateTrialDispatchIsCommitGuarded() {
       CHECK_FALSE(HasText(*methods.front(), "rbbz-settings/ultimate/value/interface.progressbar"));
     }
   }
-  CHECK_TRUE(HelpTextFor("settings_hud_timer_next_song").find("Next song.") !=
-             std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_hud_timer_next_song") ==
+             HelpTextFor("settings_hud_timer") + " - Applies on the next song you play");
   CHECK_TRUE(HelpTextFor("settings_hud_gold_next_song").empty());
-  CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find(
-                 "At main menu.") != std::string::npos);
-  CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find("Requires a restart") ==
-             std::string::npos);
-  CHECK_TRUE(HelpTextFor("settings_mm_leaderboard_menu_return").find("Restart") ==
-             std::string::npos);
-  CHECK_TRUE(HelpTextFor("no_such_menu_row_menu_return").empty());
-  CHECK_TRUE(HelpTextFor("settings_hud_pb_next_selection").find(
-                 "Next song pick.") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_camera_next_song") == "Applies on the next song you play");
+  CHECK_TRUE(HelpTextFor("settings_hud_pb_next_selection") == "Applies on the next song pick");
 
   std::vector<const dtb::Node*> select_members;
   CollectMembers(*menu, "select_row", &select_members);
@@ -5170,8 +5117,8 @@ int main(int argc, char** argv) {
   TestGameplayMappingTreeAfterP4();
   TestLocaleOverrides();
   TestLabels();
-  TestPortraitLabels();
-  TestHelpTextsCoverEveryRow();
+  TestSettingsLocaleLabels();
+  TestHelpTextLimits();
   TestHelpEventsInTheDefinition();
   TestHelpTopicsResolve();
   TestConfirmationPagesAreCaptionFree();

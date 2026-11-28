@@ -438,8 +438,8 @@ bool ReorganizeAudioPage(std::vector<dtb::Node>* nodes, std::string* reason);
 // Every locale entry the surface needs that retail does not already carry, as (key, English).
 // Rows that reuse a retail row symbol (`controls`, `calibration`, `audio_video_options`,
 // `tutorial`, `credits`) are *not* here: their labels come from the installed locale unchanged.
-// Portrait uses compact settings labels while preserving locale keys and state suffixes.
-std::vector<std::pair<std::string, std::string>> Labels(bool portrait = false);
+// Both orientations use the same settings labels.
+std::vector<std::pair<std::string, std::string>> Labels();
 
 // Retail locale entries the merged surface **rewrites**, as (key, from, to). The retail AV page
 // draws its two checkboxes as `Overscan | ENABLED` / `Bass Boost | DISABLED` - a `|` separator and
@@ -466,27 +466,23 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, std::string_view key, std
 std::vector<std::string> RequestPaths();
 
 // ------------------------------------------------------------------------------------------------
-// The help captions (owner request, 2026-10-13)
+// The help captions
 // ------------------------------------------------------------------------------------------------
-// Every row of the surface carries a one- or two-line description. While a row is highlighted, the
-// generated DTA publishes its **canonical** symbol through the settings channel
+// The generated DTA publishes the highlighted row symbol through the settings channel
 // (`rbbz-settings/help/<symbol>/-`; `help/-/-` when the surface is left - see `HelpWrite` in the
 // .cpp), and the host's help overlay draws the description below the game as a subtitle. These are
 // the host-side half: the lookup the overlay performs, and the enumeration the tests walk.
 
-// The longest text the table may carry. The overlay wraps at its own width; the bound is the
-// "short, 1-2 lines" contract from the request, enforced by tests/settings_screen_tests.cpp.
 // Keep authored descriptions <=96 ASCII characters, including apply-boundary suffixes.
 // Aim for one short sentence (two at most). Big/Biggest must fit between the
-// six-row option list and the footer; the renderer ellipsizes overflow, never overlaps.
+// six-row option list and the footer. Longer text scrolls within the reserved strip.
 inline constexpr size_t kMaxHelpTextChars = 96;
 
 // The description registered for a row's canonical symbol, or empty when there is none (the
 // overlay treats empty as "nothing to show", which is also what an unknown symbol gets).
 std::string HelpTextFor(std::string_view symbol);
 
-// Every canonical row symbol of the surface, de-duplicated, in declaration order. A row cannot be
-// reachable without being in here, and the test proves each has text by looking it up.
+// Every canonical row symbol of the surface, de-duplicated, in declaration order.
 std::vector<std::string> HelpSymbols();
 
 // ------------------------------------------------------------------------------------------------
