@@ -4082,6 +4082,40 @@ int main(int argc, char** argv) {
         CHECK_TRUE(before && after);
         CHECK_TRUE(dtb::Compile({*before}) == dtb::Compile({*after}));
       }
+      const auto song_method = [&](const char* name) {
+        return header_test::Method(song_roots, "song_select_panel", name);
+      };
+      const auto* enter = song_method("enter");
+      const auto* loaded = song_method("finish_load");
+      CHECK_TRUE(enter && !header_test::Has(*enter, "rbbz_portrait_layout"));
+      CHECK_TRUE(loaded && header_test::Has(*loaded, "rbbz_portrait_layout"));
+      for (const char* name : {"mounting_finished", "mounting_failed", "on_return_from_song_leaderboard"}) {
+        const auto* method = song_method(name);
+        CHECK_TRUE(method && header_test::Has(*method, "get_current_song"));
+        CHECK_TRUE(method && !header_test::Has(*method, "selected_pos"));
+      }
+      const auto* update = song_method("update_current_song");
+      CHECK_TRUE(update && header_test::Has(update->kids.back(), "portrait_song_title.lbl") &&
+                 header_test::Has(update->kids.back(), "get_current_song"));
+      const auto* select = song_method("SELECT_MSG");
+      CHECK_TRUE(select && select->kids.size() == 2 && select->kids[1].kids.size() == 4);
+      if (select && select->kids.size() == 2 && select->kids[1].kids.size() == 4) {
+        const auto& launch = select->kids[1].kids[2];
+        CHECK_TRUE(launch.kids.size() == 3 && header_test::Has(launch.kids[1], "get_current_song"));
+        if (launch.kids.size() == 3 && launch.kids[2].kids.size() == 3) {
+          const auto& guard = launch.kids[2].kids[1];
+          const auto& body = launch.kids[2].kids[2];
+          CHECK_TRUE(header_test::Has(guard, "is_play_random_song"));
+          CHECK_FALSE(header_test::Has(body, "selected_pos"));
+          CHECK_FALSE(header_test::Has(body, "get_metadata"));
+          for (const char* route : {"trial_song", "play_random_song", "set_song",
+                                   "mount_current_content", "song_chosen"})
+            CHECK_TRUE(header_test::Has(body, route));
+        }
+        const auto* original_select = header_test::Method(landscape_song_roots, "song_select_panel", "SELECT_MSG");
+        CHECK_TRUE(original_select && dtb::Compile({select->kids[1].kids[3]}) ==
+                                      dtb::Compile({original_select->kids[1].kids[3]}));
+      }
       for (const char* method : {"show_shortcuts", "rbbz_portrait_layout"}) {
         bool found = false;
         for (const auto& root : song_roots) found |= header_test::Find(root, dtb::kArray, method) != nullptr;

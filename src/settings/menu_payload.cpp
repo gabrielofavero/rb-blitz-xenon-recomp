@@ -1714,7 +1714,8 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
 bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string* why) {
   if (!roots) return false;
   auto staged = *roots;
-  for (const char* method : {"enter", "finish_load", "update_current_song", "mounting_finished"})
+  for (const char* method : {"finish_load", "update_current_song", "mounting_finished",
+                             "mounting_failed", "on_return_from_song_leaderboard", "SELECT_MSG"})
     if (!PanelMethod(&staged, "song_select_panel", method)) {
       if (why) *why = "portrait song panel lifecycle changed";
       return false;
@@ -1725,6 +1726,57 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
   const auto f = [](float v) {
     Node node; node.tag = ui::dtb::kFloat; node.scalar = std::bit_cast<uint32_t>(v); return node;
   };
+  const auto current_song = c({Node::Var("this"), s("get_current_song")});
+  const auto selected_pos = c({s("songs.lst"), s("selected_pos")});
+  const auto is_random = c({Node::Var("this"), s("is_play_random_song"), selected_pos});
+  const auto reads_list_position = [](const Node& node, std::string_view method) {
+    return node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
+           node.kids[1].text == method && node.kids[2].tag == ui::dtb::kCommand &&
+           node.kids[2].kids.size() == 2 && node.kids[2].kids[0].text == "songs.lst" &&
+           node.kids[2].kids[1].text == "selected_pos";
+  };
+  // The guest's current song owns the card and preview. A viewport refresh
+  // can change the native cursor without updating that song.
+  for (const char* method : {"mounting_finished", "mounting_failed", "on_return_from_song_leaderboard"}) {
+    auto& commands = PanelMethod(&staged, "song_select_panel", method)->kids;
+    auto& body = commands.back().kids;
+    if (body.size() < 4 || body[0].text != "do" ||
+        body[1].kids.size() != 2 || body[1].kids[0].text != "songs_provider" ||
+        body[2].kids.size() != 2 || body[2].kids[0].text != "selected_song" ||
+        !reads_list_position(body[2].kids[1], "get_metadata")) {
+      if (why) *why = "portrait song preview handler changed";
+      return false;
+    }
+    body[2].kids[1] = current_song;
+    body.erase(body.begin() + 1);
+  }
+  auto& select = PanelMethod(&staged, "song_select_panel", "SELECT_MSG")->kids;
+  if (select.size() != 2 || select[1].kids.size() != 4 ||
+      select[1].kids[0].text != "if_else") {
+    if (why) *why = "portrait song selection handler changed";
+    return false;
+  }
+  const auto song = Node::Var("rbbz_selected_song");
+  auto& launch = select[1].kids[2];
+  int metadata_reads = 0, random_checks = 0;
+  const auto rewrite_launch = [&](const auto& self, Node& node) -> void {
+    if (reads_list_position(node, "get_metadata")) {
+      node = song;
+      ++metadata_reads;
+    } else if (reads_list_position(node, "is_play_random_song")) {
+      node = c({s("!"), song});
+      ++random_checks;
+    } else {
+      for (auto& child : node.kids) self(self, child);
+    }
+  };
+  rewrite_launch(rewrite_launch, launch);
+  if (metadata_reads != 5 || random_checks != 2) {
+    if (why) *why = "portrait song launch paths changed";
+    return false;
+  }
+  launch = c({s("do"), Node::Array({song, current_song}),
+              c({s("if"), c({s("||"), song, is_random}), std::move(launch)})});
   const auto layout = ui::PortraitSongs(aspect);
   std::vector<Node> apply{s("rbbz_portrait_layout")};
   apply.push_back(c({s("popup_neon"), s("set_local_scale"), f(1), f(1), f(1.75f)}));
@@ -1752,17 +1804,15 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
   apply.push_back(c({s("diff_meter_rnd"), s("set_local_scale"), f(.32f), f(.32f), f(.32f)}));
   apply.push_back(c({s("diff_meter_rnd"), s("set_local_pos"), f(layout.width / 2 - 35), Node::Int(0), f(-178)}));
   apply.push_back(c({s("songs.lst"), s("refresh")}));
-  const auto call = c({Node::Var("this"), s("rbbz_portrait_layout")});
-  for (const char* method : {"enter", "finish_load"})
-    PanelMethod(&staged, "song_select_panel", method)->kids.push_back(call);
-  const auto selected = c({c({Node::Var("this"), s("get_songs_provider")}),
-                           s("get_metadata"), c({s("songs.lst"), s("selected_pos")})});
-  const auto details = c({s("do"), Node::Array({Node::Var("portrait_song"), selected}),
+  // Size and refresh the list once as it loads. The native enter handler can
+  // then restore the saved song with the final list geometry in place.
+  PanelMethod(&staged, "song_select_panel", "finish_load")->kids.push_back(
+      c({Node::Var("this"), s("rbbz_portrait_layout")}));
+  const auto details = c({s("do"), Node::Array({Node::Var("portrait_song"), current_song}),
       c({s("portrait_song_title.lbl"), s("set_display_text_string"),
          c({s("if_else"), Node::Var("portrait_song"),
             c({Node::Var("portrait_song"), s("title")}), Node::String("")})})});
-  for (const char* method : {"update_current_song", "mounting_finished"})
-    PanelMethod(&staged, "song_select_panel", method)->kids.push_back(details);
+  PanelMethod(&staged, "song_select_panel", "update_current_song")->kids.push_back(details);
   // Search owns the same footprint with its own native data provider.
   for (auto& root : staged) {
     const auto hide_rail = [&](const auto& self, Node& node) -> void {
