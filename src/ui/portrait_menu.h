@@ -55,6 +55,8 @@ struct PortraitSplashLayout {
   float city_scale, city_z;
 };
 
+inline constexpr float kPortraitMenuButtonWidth = 364.5f;
+
 // Title/loading and menu poses in the guest UI camera's 480-unit height.
 // Bounds measured from the installed animated logo's thirteen mesh records.
 inline PortraitSplashLayout PortraitSplash(float aspect) {
@@ -62,7 +64,7 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
   const float width = 480 * std::clamp(aspect, .3f, .9f);
   // Center the symmetric wordmark, rather than its asymmetric decorations.
   constexpr float logo_width = 499.4504f, logo_z = 15.408f;
-  const float list_scale = std::min(width * .76f / 364.5f, .55f);
+  const float list_scale = std::min(width * .76f / kPortraitMenuButtonWidth, .55f);
   // Like the reference's cqw units, top spacing follows visible width.
   const float flow_width = std::min(width, 270.f);
   // Preserve the title's existing size and pose across all splash states.
@@ -104,7 +106,6 @@ inline constexpr float kPortraitStoreMenuRowZ = 110;
 inline constexpr float kPortraitStoreBrowserRowZ = 108;
 inline constexpr float kPortraitSongArrowScale = .9f;
 inline constexpr float kPortraitSongArrowInset = 22;
-inline constexpr float kPortraitSongArrowTargetSize = 40;
 
 struct PortraitSongsLayout {
   float width, list_scale;
@@ -280,6 +281,12 @@ struct PortraitCalibrationAction {
   float x, z, width, height;
 };
 
+inline PortraitCalibrationAction PortraitHubArrowTarget(const PortraitSongsLayout& layout, bool right) {
+  // Leave a gap above the song tools while making near-edge taps easier to hit.
+  return {(right ? 1.f : -1.f) * (layout.width / 2 - kPortraitSongArrowInset),
+          layout.tabs_z, 68, 56};
+}
+
 inline PortraitCalibrationAction PortraitSongsFooter(float aspect, size_t index, size_t count) {
   const auto layout = PortraitSongs(aspect);
   const float width = (layout.width - 5 * (count - 1)) / count;
@@ -329,6 +336,7 @@ inline bool PortraitControlsScene(std::string_view scene) {
 
 inline bool PortraitSettingsScene(std::string_view scene) {
   return scene == "settings_menu.milo" || scene == "settings_menu_pause.milo" ||
+         scene == "../options_menu/settings_tutorials.milo" ||
          scene == "../av_options/settings_scale.milo" ||
          scene == "../av_options/settings_scale_pause.milo" ||
          scene == "av_options.milo" || scene == "credits.milo";
@@ -392,7 +400,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||
-         panel == "av_options_panel" || panel == "credits_panel" ||
+         panel == "av_options_panel" || panel == "credits_panel" || panel == "tutorials_panel" ||
          (screen == "song_select_screen" && panel == "song_select_panel") ||
          (screen == "inbox_screen" && panel == "inbox_panel") ||
          (screen == "recommendation_screen" && panel == "recommendation_panel") ||

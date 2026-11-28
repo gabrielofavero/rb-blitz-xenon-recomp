@@ -35,8 +35,10 @@
 #include "hooks/portrait_layout.h"
 #include "input/portrait_panel.h"
 #include "input/dialog_target.h"
+#include "input/menu_marquee.h"
 #include "hooks/render_settings.h"
 #include "ui/settings_screen.h"
+#include "ui/text_marquee.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
@@ -77,6 +79,7 @@ REX_EXTERN(__imp__sub_824BC7D0);
 REX_EXTERN(__imp__sub_824DC1E8); // UISlider::DrawShowing
 REX_EXTERN(__imp__sub_8229FD60); // RndText: cumulative UTF-16 advances during normal layout
 REX_EXTERN(sub_8220DB30);       // RndMesh::Sync
+REX_EXTERN(__imp__sub_8220DB30);
 
 namespace rb_blitz::input {
 namespace {
@@ -665,7 +668,8 @@ bool PortraitSettingsActive() {
   std::lock_guard lock(mutex);
   return rb_blitz::settings::InterfacePortraitEnabled() &&
          (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name) ||
-          current_panel_name == "av_options_panel" || current_panel_name == "credits_panel");
+          current_panel_name == "av_options_panel" || current_panel_name == "credits_panel" ||
+          current_panel_name == "tutorials_panel");
 }
 bool PortraitConnectionActive() {
   std::lock_guard lock(mutex);
@@ -1036,8 +1040,158 @@ struct DrawCapture {
   bool suppress = false;
   bool touch = false;
   bool store_rows = false;
+  float marquee_width = 0;
 };
 thread_local DrawCapture* drawing = nullptr;
+
+bool SettingsMenuPanel() {
+  return ui::PortraitSettingsScene(current_panel_scene) ||
+         ui::PortraitControlsPanel(current_panel_name) ||
+         current_panel_name == "options_panel" || current_panel_name == "av_options_panel" ||
+         current_panel_name == "tutorials_panel";
+}
+
+float MenuRowMarqueeWidth(std::string_view list_name, bool portrait) {
+  const bool main_menu = DrawScreenName() == "splash_screen" &&
+      current_panel_name == "splash_panel" && list_name == "start.lst";
+  const bool settings = (SettingsMenuPanel() || current_panel_name == "pause_panel") &&
+      (list_name == "options.lst" || list_name == "checkbox.lst" ||
+       (portrait && list_name == "cal_mode.lst"));
+  if (!main_menu && !settings) return 0;
+  // The portrait button is 364.5 local units wide, with room for ink bearings
+  // and a gap to its border. Landscape uses the native text slots.
+  return portrait ? ui::kPortraitMenuButtonWidth - 32 : main_menu ? 380 : 240;
+}
+
+thread_local bool retain_marquee_vertices = false;
+constexpr uint32_t kKeepMeshVertices = 0x200;
+
+struct MenuMarqueeState {
+  ui::TextMarquee marquee;
+  std::string text;
+  uint32_t screen = 0, surface = 0, row = 0, frame = 0;
+  bool clipped = false;
+};
+thread_local std::unordered_map<uint32_t, MenuMarqueeState> menu_marquees;
+
+void UploadMenuGlyphs(PPCContext& ctx, uint8_t* base, uint32_t mesh) {
+  GuestCall call(ctx, base);
+  // Upload the native vertex fields and keep the CPU copy for later layout.
+  rex::ppc::Call<void>(call.ctx, base, sub_8220DB30, mesh, kKeepMeshVertices | 0x1F);
+}
+
+void RestoreMenuGlyphUpload(PPCContext& ctx, uint8_t* base, uint32_t label, bool owns_label) {
+  if (menu_marquees.empty() || !label) return;
+  const auto found = menu_marquees.find(label);
+  if (found == menu_marquees.end()) return;
+  // A secondary draw pass can visit the same label outside the captured list.
+  // Let the owning menu draw keep the animation and its current upload.
+  if (!owns_label && found->second.screen == current_screen) return;
+  if (found->second.clipped) {
+    uint32_t uploaded = 0;
+    VisitLabelGlyphQuads(label, [base](uint32_t at) { return U32(base, at); },
+        [&](uint32_t mesh, uint32_t) {
+          if (mesh != uploaded) UploadMenuGlyphs(ctx, base, mesh);
+          uploaded = mesh;
+          return true;
+        });
+  }
+  menu_marquees.erase(found);
+}
+
+std::string_view PrepareMarqueeLabel(PPCContext& ctx, uint8_t* base, uint32_t label, float width) {
+  const auto address = U32(base, label + 80);
+  if (!address) return {};
+  const auto* chars = reinterpret_cast<const char*>(base + address);
+  const std::string_view text(chars, strnlen(chars, 1024));
+  if (text.empty() || text.size() == 1024 || text.find_first_of("\r\n") != text.npos) return {};
+  // The guest auto-fit width shrinks letters before the draw hook can measure
+  // them. Clear that constraint on the live label and retain its height fit.
+  if (U32(base, label + 84)) {
+    Float(base, label + 84, 0);
+    base[label + 178] = 1;
+  }
+  const auto update = [&](bool keep_vertices) {
+    const bool previous = retain_marquee_vertices;
+    retain_marquee_vertices = keep_vertices;
+    rex::ScopeGuard restore([&] { retain_marquee_vertices = previous; });
+    GuestCall call(ctx, base);
+    rex::ppc::Call<void>(call.ctx, base, sub_824BAF98, label, uint32_t(0));
+  };
+  if (base[label + 178]) update(false);
+  if (F32(base, label + 152) > width &&
+      !VisitLabelGlyphQuads(label, [base](uint32_t at) { return U32(base, at); },
+                           [](uint32_t, uint32_t) { return true; })) {
+    // RndText normally releases its CPU vertices after the upload. Rebuild
+    // with a retained copy only for a label that needs to scroll.
+    update(true);
+  }
+  return text;
+}
+
+bool DrawMarqueeLabel(PPCContext& ctx, uint8_t* base, uint32_t label, std::string_view text,
+                      const std::array<float, 4>& ink, float center, float width,
+                      uint32_t surface, uint32_t row, void (*draw_label)(PPCContext&, uint8_t*)) {
+  const float text_width = ink[2] - ink[0];
+  if (text.empty() || !(width > 0 && text_width > width + .01f)) return false;
+
+  if (menu_marquees.size() >= 128 && !menu_marquees.contains(label)) menu_marquees.clear();
+  auto& state = menu_marquees[label];
+  if (state.screen != current_screen || state.surface != surface || state.row != row ||
+      frame_number - state.frame > 1 || state.text != text) {
+    state = {{}, std::string(text), current_screen, surface, row, frame_number, state.clipped};
+  }
+  state.frame = frame_number;
+  const float scale = (ink[3] - ink[1]) / 16.f;
+  const float offset = state.marquee.Offset(text_width, width, scale, TouchTime());
+  const float left = center - width / 2, right = center + width / 2;
+  const float shift = left - ink[0] - offset;
+  constexpr uint32_t kVertexU = 64;
+  struct Edit {
+    uint32_t mesh, vertices;
+    std::array<GlyphEdgeVertex, 4> original, clipped;
+  };
+  std::vector<Edit> edits;
+  edits.reserve(text.size());
+  const bool valid = VisitLabelGlyphQuads(label, [base](uint32_t at) { return U32(base, at); },
+      [&](uint32_t mesh, uint32_t vertices) {
+        Edit edit{mesh, vertices, {}, {}};
+        for (uint32_t corner = 0; corner < 4; ++corner) {
+          const auto at = vertices + corner * kLabelVertexStride;
+          edit.original[corner] = {F32(base, at), F32(base, at + kVertexU)};
+          if (!std::isfinite(edit.original[corner].u)) return false;
+        }
+        if (edit.original[0].x == edit.original[3].x &&
+            edit.original[1].x == edit.original[2].x) return true;
+        edit.clipped = ClipMenuGlyph(edit.original, shift, left, right);
+        edits.push_back(edit);
+        return true;
+      });
+  if (!valid || edits.empty()) return false;
+
+  const auto write_quad = [&](uint32_t vertices, const auto& quad) {
+    for (uint32_t corner = 0; corner < 4; ++corner) {
+      const auto at = vertices + corner * kLabelVertexStride;
+      Float(base, at, quad[corner].x);
+      Float(base, at + kVertexU, quad[corner].u);
+    }
+  };
+  // Restore the CPU geometry immediately. The graphics thread can consume
+  // this draw later, so keep its clipped upload until the next native draw.
+  rex::ScopeGuard restore([&] {
+    for (const auto& edit : edits) write_quad(edit.vertices, edit.original);
+  });
+  uint32_t mesh = 0;
+  for (const auto& edit : edits) {
+    if (mesh && edit.mesh != mesh) UploadMenuGlyphs(ctx, base, mesh);
+    mesh = edit.mesh;
+    write_quad(edit.vertices, edit.clipped);
+  }
+  UploadMenuGlyphs(ctx, base, mesh);
+  state.clipped = true;
+  draw_label(ctx, base);
+  return true;
+}
 
 bool PortraitPowerupFooterRow(uint8_t* base) {
   return drawing && drawing->row && settings::InterfacePortraitEnabled() &&
@@ -1094,6 +1248,13 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
   const auto header = ObjectBase(base, owner);
   const auto dir = header ? U32(base, header + 36) : 0;
   if (RecommendationFooter(ctx, base, dir)) return RecommendationFooterEntries(entries);
+  if (PortraitStoreActive() && DrawScreenName() == "store_menu_screen" &&
+      ObjectName(base, header) == "InlineHelp.ihp") {
+    std::vector<InlineHelpEntry> visible;
+    for (const auto action : {2u, 4u})  // Cancel (Back), Start (Filters).
+      for (const auto& entry : entries) if (entry.action == action) visible.push_back(entry);
+    return visible;
+  }
   if (PortraitStoreActive() && DrawScreenName() == "store_info_screen" &&
       ObjectName(base, header) == "store_info.ihp") return RecommendationFooterEntries(entries);
   if (dir && SceneObject(ctx, base, dir, "portrait_powerups.color") &&
@@ -1145,6 +1306,13 @@ void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index,
   draw(ctx, base);
 }
 
+void CaptureHintTarget(MenuBounds bounds, uint16_t button) {
+  // The first target drawn in a frame replaces the prior frame's geometry.
+  if (!hint_targets.empty() && hint_targets.back().frame != frame_number)
+    hint_targets.clear();
+  hint_targets.push_back({current_screen, current_focus, frame_number, bounds, button, current_input_scope});
+}
+
 bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
                                const std::string& stem, size_t index, size_t count, bool reflow,
                                bool visible = true) {
@@ -1154,29 +1322,25 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
     const auto name = std::string(stem) + (border ? "_border.mesh" : ".mesh");
     const auto mesh = SceneMesh(ctx, base, dir, name.c_str());
     if (!mesh) continue;
-    const bool song_control = !reflow && stem.rfind("portrait_", 0) == 0 &&
-        (stem == "portrait_sort" || stem == "portrait_search" || stem == "portrait_header_previous" || stem == "portrait_header_next");
+    const bool hub_arrow = !reflow && stem.starts_with("portrait_header_");
+    const bool song_control = !reflow && (hub_arrow || stem == "portrait_sort" || stem == "portrait_search");
     if (reflow || song_control) {
       const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
       ui::PortraitCalibrationAction slot{};
       if (song_control) {
         const auto layout = ui::PortraitSongs(aspect);
-        const bool arrow = stem.rfind("portrait_header_", 0) == 0;
-        const bool left = stem == "portrait_sort" || stem == "portrait_header_previous";
-        slot = {(left ? -1.f : 1.f) * (arrow ? layout.width / 2 - ui::kPortraitSongArrowInset : layout.width / 4 + 2),
-                arrow ? layout.tabs_z : layout.tools_z,
-                arrow ? ui::kPortraitSongArrowTargetSize : layout.width / 2 - 3,
-                arrow ? ui::kPortraitSongArrowTargetSize : 27.f};
+        slot = hub_arrow ? ui::PortraitHubArrowTarget(layout, stem == "portrait_header_next") :
+            ui::PortraitCalibrationAction{(stem == "portrait_sort" ? -1.f : 1.f) * (layout.width / 4 + 2),
+                                          layout.tools_z, layout.width / 2 - 3, 27};
       } else slot = PortraitFooterSlot(ctx, base, dir, index, count);
       // Hub arrows belong to the unfitted background marquee, like its title.
-      const auto fit = song_control && stem.rfind("portrait_header_", 0) == 0
-          ? ui::PortraitFit{} : portrait_draw_fit;
+      const auto fit = hub_arrow ? ui::PortraitFit{} : portrait_draw_fit;
       const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, mesh + 64);
       const float width = (slot.width + (border ? 1.4f : 0)) * fit.scale;
       const float height = (slot.height + (border ? 1.4f : 0)) * fit.scale;
       Float(base, world, width / 300);
       Float(base, world + 24, height / 30);
-      const bool moving_content = reflow || (song_control && stem.rfind("portrait_header_", 0) != 0);
+      const bool moving_content = !hub_arrow;
       Float(base, world + 48, fit.X(slot.x) - width / 2 +
           (moving_content ? drawing_panel_translation.x : 0));
       Float(base, world + 52, border ? .2f : .1f);
@@ -1235,11 +1399,8 @@ void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
     const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false, !songs);
     if (songs && !current_input_scope) {
       const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
-      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
-        std::lock_guard lock(mutex);
-        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
-                                uint16_t(left ? 0x0100 : 0x0200), 0});
-      }
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt)
+        CaptureHintTarget(*bounds, left ? 0x0100 : 0x0200);
     }
     if (songs) continue; // The background panel draws and animates the retail header arrows.
     for (bool glow : {false, true}) {
@@ -1454,7 +1615,7 @@ void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
   paint(mesh, 0);
 }
 
-void CaptureLabel(PPCContext& ctx, uint8_t* base) {
+void CaptureLabel(PPCContext& ctx, uint8_t* base, float marquee_width) {
   if (!drawing || !drawing->row || ctx.r7.u32) return;
   const auto row = drawing->row;
   const auto label = U32(base, ctx.r3.u32 + 8);
@@ -1463,8 +1624,11 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   // Retail UILabel stores its current text rectangle at +144. The stock
   // UIList bounding-box path omits the final slot transform; the rendering
   // path provides that exact transform in r4, including provider adjustments.
-  const float x = F32(base, label + 144), z = F32(base, label + 148);
-  const float width = F32(base, label + 152), height = F32(base, label + 156);
+  const float text_width = F32(base, label + 152), height = F32(base, label + 156);
+  const bool overflow = marquee_width > 0 && text_width > marquee_width;
+  const float x = overflow ? -marquee_width / 2 : F32(base, label + 144);
+  const float width = overflow ? marquee_width : text_width;
+  const float z = F32(base, label + 148);
   if (!(width > 0) || height == 0) return;
   GuestCall call(ctx, base); auto& c = call.ctx;
   const auto local = call.scratch, world = local + 16, projected = local + 32;
@@ -1483,6 +1647,23 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
     bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
   }
   CaptureRow(base, bounds);
+}
+
+void DrawListLabel(PPCContext& ctx, uint8_t* base) {
+  const float width = drawing && drawing->row && !ctx.r7.u32 ? drawing->marquee_width : 0;
+  const auto label = !ctx.r7.u32 ? U32(base, ctx.r3.u32 + 8) : 0;
+  const auto text = label && width > 0 ? PrepareMarqueeLabel(ctx, base, label, width) : std::string_view{};
+  CaptureLabel(ctx, base, text.empty() ? 0 : width);
+  if (!text.empty()) {
+    const auto ink = InlineHelpGlyphBounds(label,
+        [base](uint32_t at) { return U32(base, at); },
+        [base](uint32_t at) { return F32(base, at); });
+    if (ink && DrawMarqueeLabel(ctx, base, label, text, *ink, 0, width,
+                                drawing->result.list, U32(base, drawing->row + 36),
+                                __imp__sub_824E9A90)) return;
+  }
+  RestoreMenuGlyphUpload(ctx, base, label, width > 0);
+  __imp__sub_824E9A90(ctx, base);
 }
 
 std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
@@ -1821,6 +2002,8 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   DrawPresetArrows(ctx, base, label);
   const bool portrait = settings::InterfacePortraitEnabled();
   const auto name = ObjectName(base, ObjectBase(base, label));
+  const bool settings_title = name == "header.lbl" && SettingsMenuPanel();
+  if (!settings_title) RestoreMenuGlyphUpload(ctx, base, label, false);
   if (DrawPortraitStoreDialogControl(ctx, base, label, name)) return;
   if (DrawPortraitReadingText(ctx, base, label, name)) return;
   if (drawing && drawing->store_rows && drawing->row && !drawing->suppress &&
@@ -1845,11 +2028,8 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
     if (current_panel_name == "recommendation_panel" && !current_input_scope && current_focus &&
         U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
       const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
-      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
-        std::lock_guard lock(mutex);
-        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
-            uint16_t(name == "portrait_rec_previous.lbl" ? 0x0004 : 0x0008), 0});
-      }
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt)
+        CaptureHintTarget(*bounds, name == "portrait_rec_previous.lbl" ? 0x0004 : 0x0008);
     }
     const auto mesh = SceneMesh(ctx, base, dir, (stem + "_arrow.mesh").c_str());
     if (mesh) if (auto* draw = rex::ppc::ResolveFunction(U32(base, U32(base, mesh) + 24)))
@@ -1888,17 +2068,30 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
     DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
     if (!current_input_scope) {
       const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
-      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
-        std::lock_guard lock(mutex);
-        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
-                               uint16_t(name == "sorting.lbl" ? 0x20 : 0x10), 0});
-      }
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt)
+        CaptureHintTarget(*bounds, name == "sorting.lbl" ? 0x20 : 0x10);
     }
   }
   const bool calibration = portrait && DrawScreenName().starts_with("cal_");
   const bool calibration_title = calibration && (name == "audio_title.lbl" || name == "video_title.lbl");
   const bool title = calibration_title || (portrait && name == "header.lbl" &&
       ui::PortraitSplashScreen(DrawScreenName(), current_panel_name, current_panel_scene));
+  constexpr float kLandscapeTitleWidth = 480.f;
+  const float title_width = title && settings_title
+      ? ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .94f
+      : kLandscapeTitleWidth;
+  const auto title_text = settings_title ? PrepareMarqueeLabel(ctx, base, label, title_width)
+                                         : std::string_view{};
+  if (settings_title && !title) {
+    if (!title_text.empty()) {
+      const auto ink = InlineHelpGlyphBounds(label,
+          [base](uint32_t at) { return U32(base, at); },
+          [base](uint32_t at) { return F32(base, at); });
+      if (ink && DrawMarqueeLabel(ctx, base, label, title_text, *ink, ((*ink)[0] + (*ink)[2]) / 2,
+                                  title_width, current_panel, 0, __imp__sub_824BC668)) return;
+    }
+    RestoreMenuGlyphUpload(ctx, base, label, true);
+  }
   const bool success = calibration && CalibrationToken(base, label) == "lag_success";
   const bool instruction = calibration &&
       (name == "cal_audio_instructions.lbl" || name == "cal_video_instructions.lbl");
@@ -1934,7 +2127,11 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (base[label + 178])
     rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
   const float width = F32(base, label + 152), height = F32(base, label + 156);
-  if (!(width > 0) || !std::isfinite(height)) { DrawMenuHintLabel(ctx, base, label); return; }
+  if (!(width > 0) || !std::isfinite(height)) {
+    if (settings_title) RestoreMenuGlyphUpload(ctx, base, label, true);
+    DrawMenuHintLabel(ctx, base, label);
+    return;
+  }
   const auto ink = InlineHelpGlyphBounds(label,
       [base](uint32_t address) { return U32(base, address); },
       [base](uint32_t address) { return F32(base, address); });
@@ -2061,6 +2258,10 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (instruction) cx = 0;
   Float(base, world + 48, x - F32(base, world) * cx - F32(base, world + 32) * cz);
   Float(base, world + 56, z - F32(base, world + 8) * cx - F32(base, world + 40) * cz);
+  if (title && settings_title && ink &&
+      DrawMarqueeLabel(ctx, base, label, title_text, *ink, cx, title_width,
+                       current_panel, 0, __imp__sub_824BC668)) return;
+  if (title && settings_title) RestoreMenuGlyphUpload(ctx, base, label, true);
   if (song_tab >= 0 && menu_available && !current_input_scope)
     if (const auto bounds = ProjectLabel(ctx, base, label))
       header_geometry[song_tab] = {current_screen, current_focus, frame_number, *bounds};
@@ -2132,11 +2333,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
     }
     return;
   }
-  // Keep only the current draw's geometry; a hidden or cleared legend must stop
-  // being clickable on the next poll even when its guest label is reused.
-  if (!hint_targets.empty() && hint_targets.back().frame != frame_number)
-    hint_targets.clear();
-  hint_targets.push_back({current_screen, current_focus, frame_number, *bounds, button, current_input_scope});
+  CaptureHintTarget(*bounds, button);
   static thread_local std::unordered_map<uint32_t, uint32_t> traced;
   if (traced.size() > 128) traced.clear();
   if (traced[label] != current_screen) {
@@ -2263,25 +2460,29 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // mouse-specific use of the result (Select, the hover lift, the wheel's rail) reads the
   // preference - the queue is disabled when it is off, so none of those ever runs.
   const auto list_header = ObjectBase(base, list);
+  const auto list_name = ObjectName(base, list_header);
   const bool belongs = dialog_scope != MenuDialogScope::kPanel ||
       (list_header && U32(base, list_header + 36) == current_panel_dir);
   const bool focused = list == current_focus && menu_available && belongs;
   const bool scale_buttons = menu_available && belongs &&
       (current_panel_name == "settings_scale_panel" || current_panel_name == "settings_scale_pause_panel") &&
-      ObjectName(base, list_header) == "checkbox.lst";
+      list_name == "checkbox.lst";
   const bool touch = last_device::Current().using_touch;
-  const bool portrait_songs = settings::InterfacePortraitEnabled() &&
+  const bool portrait = settings::InterfacePortraitEnabled();
+  const bool portrait_songs = portrait &&
       (DrawScreenName() == "song_select_screen" || DrawScreenName() == "inbox_screen" ||
        DrawScreenName() == "recommendation_screen" || PortraitStoreActive());
-  const bool portrait_powerups = settings::InterfacePortraitEnabled() && DrawScreenName() == "powerup_select_screen";
-  if (ctx.r9.u32 || !list || (!focused && !scale_buttons && !touch && !portrait_songs && !portrait_powerups)) {
+  const bool portrait_powerups = portrait && DrawScreenName() == "powerup_select_screen";
+  const float marquee_width = belongs ? MenuRowMarqueeWidth(list_name, portrait) : 0;
+  if (ctx.r9.u32 || !list ||
+      (!focused && !scale_buttons && !touch && !portrait_songs && !portrait_powerups && !marquee_width)) {
     DrawNativeList(ctx, base); return;
   }
   DrawCapture capture;
   capture.resource = ctx.r3.u32;
+  capture.marquee_width = marquee_width;
   if (portrait_songs && PortraitStoreActive()) {
-    const auto name = ObjectName(base, list_header);
-    capture.store_rows = name == "filter.lst" || name == "song.lst";
+    capture.store_rows = list_name == "filter.lst" || list_name == "song.lst";
   }
   capture.touch = touch;
   capture.result.list = list; capture.result.frame = frame_number;
@@ -2555,8 +2756,7 @@ REX_HOOK_RAW(sub_824E9A90) {
   using namespace rb_blitz::input;
   if (PortraitPowerupFooterRow(base)) return;
   rb_blitz::input::DrawPortraitSongRow(ctx, base);
-  rb_blitz::input::CaptureLabel(ctx, base);
-  __imp__sub_824E9A90(ctx, base);
+  rb_blitz::input::DrawListLabel(ctx, base);
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
@@ -2600,6 +2800,13 @@ REX_HOOK_RAW(sub_8229FD60) {
     advances.push_back(F32(base, advances_address + uint32_t(i * 4)));
   if (dialog_prompts.size() > 128) dialog_prompts.clear();
   dialog_prompts[label] = DialogPromptSpans(text, advances);
+}
+REX_HOOK_RAW(sub_8220DB30) {
+  using namespace rb_blitz::input;
+  // This return address belongs to the upload of RndText's generated glyphs.
+  if (retain_marquee_vertices && ctx.lr == 0x822A1194)
+    ctx.r4.u32 |= kKeepMeshVertices;
+  __imp__sub_8220DB30(ctx, base);
 }
 REX_HOOK_RAW(sub_824E0900) {
   using namespace rb_blitz::input;

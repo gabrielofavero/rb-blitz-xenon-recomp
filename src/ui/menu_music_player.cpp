@@ -20,6 +20,7 @@
 #include "ui/help_overlay.h"
 #include "ui/menu_music_artwork.h"
 #include "ui/menu_music_text.h"
+#include "ui/text_marquee.h"
 #include "ui/portrait_viewport.h"
 
 namespace rb_blitz::ui::music {
@@ -95,7 +96,7 @@ void Label(ImDrawList* draw, ImFont* font, float size, ImVec2 at, float width,
 }
 
 void DrawSongTitle(ImDrawList* draw, ImFont* font, float size, ImVec2 at, float width,
-                   ImU32 color, std::string_view title, float scale, TitleMarquee& marquee) {
+                   ImU32 color, std::string_view title, float scale, TextMarquee& marquee) {
   if (width <= 0) return;
   const std::string text = SingleLine(title);
   const float text_width = font->CalcTextSizeA(size, FLT_MAX, 0, text.c_str()).x;
@@ -372,7 +373,7 @@ class Player final : public rex::ui::DialogBase {
   std::unique_ptr<rex::ui::ImageTexture> texture_;
   ArtTag texture_tag_;
   std::string last_title_;
-  TitleMarquee bar_title_, drawer_title_;
+  TextMarquee bar_title_, drawer_title_;
 };
 }  // namespace
 

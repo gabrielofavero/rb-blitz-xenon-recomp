@@ -392,6 +392,8 @@ bool InstallMenuPayload(rex::kernel::TitleRuntime* runtime, bool settings_restar
                                   uint64_t(BootRenderHeight()) * 4;
     if (InterfacePortraitEnabled() && BootPortraitHeight())
       configuration.portrait_aspect = float(BootPortraitWidth()) / BootPortraitHeight();
+    else if (GameplayPortraitEnabled() && GameplayPortraitHeight())
+      configuration.portrait_aspect = float(GameplayPortraitWidth()) / GameplayPortraitHeight();
     configuration.download_content_row = download_content_row;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;

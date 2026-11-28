@@ -77,7 +77,8 @@ inline constexpr char kPauseRecord[] = "ui/pause/gen/pause.milo_xbox";
 // action above a native button mesh. Both menu and pause settings use this copy.
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, float aspect,
-                             std::vector<uint8_t>* scene, std::string* error);
+                             std::vector<uint8_t>* scene, std::string* error,
+                             std::string_view title_token = {});
 bool PreparePortraitAudio(const std::vector<uint8_t>& source,
                          const std::vector<uint8_t>& button_source, float aspect,
                          std::vector<uint8_t>* scene, std::string* error);
@@ -179,10 +180,10 @@ using CalibrationButtons = std::array<std::vector<std::vector<uint8_t>>, 4>;
 std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons();
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error);
-// Author portrait star placement and optional touch controls into the installed
-// guest HUD before replacing any hint fonts.
+// Author portrait HUD layout and optional touch controls before replacing hint fonts.
 bool PrepareGameplayHud(const std::vector<uint8_t>& source, bool portrait, bool touch,
-                        std::vector<uint8_t>* scene, std::string* error);
+                        std::vector<uint8_t>* scene, std::string* error,
+                        float portrait_aspect = 9.f / 16.f);
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                           std::string* error);
 bool PrepareErrorReturn(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

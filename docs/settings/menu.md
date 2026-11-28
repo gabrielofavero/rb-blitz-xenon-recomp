@@ -197,13 +197,13 @@ linked-setting confirmations.
 The Settings Labels size is saved as `interface.settings_label_size` (stable ID 91),
 defaults to Normal, and applies immediately. The existing visibility key stays
 `interface.settings_labels`. The caption uses a bounded strip from 76.5% to 86.5%
-of the window height, below the six-row list and above the footer. Font-measured
-wrapping and word-boundary ellipsis prevent overflow; descriptions must stay within
-96 ASCII characters including apply-boundary suffixes (see `AGENTS.md` and
-`src/ui/help_layout.h`). Live visual acceptance at each size remains pending.
-Each wrapped line is centered, and the black background fits the measured text
-with padding. Controller layout groups, layout choices, and Controller Presets
-draw no settings labels in either menu context.
+of the window height, below the six-row list and above the footer. Captions use
+font-measured wrapping and take up more width on narrow screens. When a caption
+overflows vertically, it advances one line at a time with reading pauses and
+then returns to the start. The background stays fixed during the animation.
+Each wrapped line is centered, and authored descriptions have a 96 ASCII
+character limit including apply-boundary suffixes. Controller layout groups,
+layout choices, and Controller Presets draw no settings labels in either menu context.
 
 The preceding menu reorganization preserved stored setting IDs, keys, defaults, and
 apply boundaries are unchanged. Main-menu shortcuts are grouped by purpose;

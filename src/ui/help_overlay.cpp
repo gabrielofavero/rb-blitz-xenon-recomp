@@ -28,7 +28,6 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
-#include <vector>
 
 #include <imgui.h>
 #include "settings/runtime_settings.h"
@@ -62,6 +61,7 @@ namespace {
 // observer's once-per-frame publication free.
 std::mutex g_text_mutex;
 std::string g_text;
+uint64_t g_text_revision = 0;
 
 // The face the caption draws with: a system sans when one could be read, null for the SDK's own
 // font (the fallback). Written once, inside the drawer's initialization, before any draw.
@@ -116,9 +116,11 @@ class HelpOverlayDialog final : public rex::ui::DialogBase {
     // enumerates, which is exactly the state a recovery exists for.
     input::TickInputRecovery();
     std::string text;
+    uint64_t revision;
     {
       std::lock_guard lock(g_text_mutex);
       text = g_text;
+      revision = g_text_revision;
     }
     // Listening instructions and countdown stay with the input surface, including with
     // Settings Labels off. Wrong-kind presses and save failures use notifications.
@@ -138,6 +140,7 @@ class HelpOverlayDialog final : public rex::ui::DialogBase {
     if (text.empty() ||
         (!capturing && !searching &&
          !rb_blitz::settings::title::settings_help_overlay.Get())) {
+      scroll_.Reset();
       return true;
     }
 
@@ -145,55 +148,40 @@ class HelpOverlayDialog final : public rex::ui::DialogBase {
     // descriptions. Every source uses the same bounded strip above the footer.
     const bool status = capturing || searching;
     const auto layout = LayoutCaption(io.DisplaySize.x, io.DisplaySize.y,
-                                     status ? "normal" : rb_blitz::settings::title::settings_help_size.Get());
+                                      status ? "normal" : rb_blitz::settings::title::settings_help_size.Get(),
+                                      !status);
     const float size = layout.font_size;
     ImGui::PushFont(g_caption_font, size);
     ImFont* font = ImGui::GetFont();
-    // Use the same measured lines for fitting, panel bounds, and drawing. Drawing
-    // each line separately centers short final lines as well as single-line captions.
-    const auto wrap = [&](const std::string& value) {
-      std::vector<std::string_view> lines;
-      const char* begin = value.data();
-      const char* end = begin + value.size();
-      while (begin < end) {
-        const char* newline = std::find(begin, end, '\n');
-        const char* line_end = font->CalcWordWrapPosition(size, begin, newline,
-                                                         layout.TextWidth());
-        // ImGui can return one byte for a glyph wider than the available space.
-        // Keep UTF-8 intact even in an unusually narrow window.
-        while (line_end < newline &&
-               (static_cast<unsigned char>(*line_end) & 0xC0) == 0x80) ++line_end;
-        const char* trimmed = line_end;
-        while (trimmed > begin && (trimmed[-1] == ' ' || trimmed[-1] == '\t')) --trimmed;
-        lines.emplace_back(begin, trimmed - begin);
-        begin = line_end;
-        while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
-        if (begin < end && *begin == '\n') ++begin;
+    const auto wrap = [&](std::string_view value) {
+      return WrapCaption(value,
+          [&](const char* begin, const char* end) {
+            return font->CalcWordWrapPosition(size, begin, end, layout.TextWidth());
+          },
+          [&](std::string_view line) {
+            return font->CalcTextSizeA(size, 1e9f, 0, line.data(), line.data() + line.size()).x;
+          });
+    };
+    if (status) {
+      scroll_.Reset();
+      text = FitCaption(std::move(text), [&](std::string_view value) {
+        const auto lines = wrap(value);
+        return lines.size() <= layout.LineCapacity() &&
+               std::ranges::all_of(lines, [&](const auto& line) { return line.width <= layout.TextWidth(); });
+      });
+      if (text.empty()) {
+        ImGui::PopFont();
+        return true;
       }
-      return lines;
-    };
-    const auto measure_line = [&](std::string_view line) {
-      return font->CalcTextSizeA(size, 1e9f, 0.0f, line.data(), line.data() + line.size());
-    };
-    const auto measure = [&](const std::string& value) {
-      const auto lines = wrap(value);
-      ImVec2 bounds(0.0f, size * lines.size());
-      for (const auto line : lines) bounds.x = std::max(bounds.x, measure_line(line).x);
-      return bounds;
-    };
-    text = FitCaption(std::move(text), [&](const std::string& value) {
-      const auto bounds = measure(value);
-      return bounds.x <= layout.TextWidth() && bounds.y <= layout.TextHeight();
-    });
-    if (text.empty()) {
-      ImGui::PopFont();
-      return true;
     }
     const auto lines = wrap(text);
-    const auto bounds = measure(text);
-    const float panel_width = std::min(layout.width, bounds.x + 2 * layout.pad_x);
+    float text_width = 0;
+    for (const auto& line : lines) text_width = std::max(text_width, line.width);
+    const float text_height = size * std::min(lines.size(), layout.LineCapacity());
+    const float offset = status ? 0 : size * scroll_.Offset(layout, lines.size(), revision, ImGui::GetTime());
+    const float panel_width = std::min(layout.width, text_width + 2 * layout.pad_x);
     const float panel_height = std::min(layout.bottom - layout.top,
-                                        bounds.y + 2 * layout.pad_y);
+                                        text_height + 2 * layout.pad_y);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, layout.bottom),
                             ImGuiCond_Always, ImVec2(0.5f, 1.0f));
     ImGui::SetNextWindowSize(ImVec2(panel_width, panel_height), ImGuiCond_Always);
@@ -211,11 +199,19 @@ class HelpOverlayDialog final : public rex::ui::DialogBase {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     if (ImGui::Begin("##rb_blitz_help", nullptr, flags)) {
       const auto origin = ImGui::GetWindowPos();
-      float y = origin.y + layout.pad_y;
-      for (const auto line : lines) {
-        const float x = origin.x + (panel_width - measure_line(line).x) * 0.5f;
-        ImGui::GetWindowDrawList()->AddText(font, size, ImVec2(x, y),
-            ImGui::GetColorU32(ImGuiCol_Text), line.data(), line.data() + line.size());
+      const ImVec4 clip(origin.x + layout.pad_x, origin.y + layout.pad_y,
+                        origin.x + panel_width - layout.pad_x,
+                        origin.y + panel_height - layout.pad_y);
+      auto* draw = ImGui::GetWindowDrawList();
+      const auto color = ImGui::GetColorU32(ImGuiCol_Text);
+      float y = clip.y - offset;
+      for (const auto& line : lines) {
+        if (y >= clip.w) break;
+        if (y + size > clip.y && !line.text.empty()) {
+          const float x = origin.x + (panel_width - line.width) * 0.5f;
+          draw->AddText(font, size, ImVec2(x, y), color,
+                        line.text.data(), line.text.data() + line.text.size(), 0, &clip);
+        }
         y += size;
       }
     }
@@ -224,7 +220,10 @@ class HelpOverlayDialog final : public rex::ui::DialogBase {
     ImGui::PopStyleVar(4);
     ImGui::PopFont();
     return true;
-}
+  }
+
+ private:
+  CaptionScroll scroll_;
 };
 
 }  // namespace
@@ -274,6 +273,7 @@ void PublishText(std::string text) {
       return;
     }
     g_text = text;
+    ++g_text_revision;
   }
   REXLOG_DEBUG("help_overlay: caption -> '{}'", text.empty() ? "(hidden)" : text);
 }

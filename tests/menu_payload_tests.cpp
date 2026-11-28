@@ -2640,6 +2640,24 @@ int main(int argc, char** argv) {
     CHECK_EQ(portrait_touch.size(), scene.size());
     if (portrait.size() != 0x810 + 4838050 || portrait_touch.size() != scene.size())
       return Finish();
+    BeginCase("portrait tutorial rails and lesson text fit a narrow screen");
+    constexpr float phone_aspect = .46f;
+    std::vector<uint8_t> narrow_hud;
+    CHECK_TRUE(font::PrepareGameplayHud(source, true, false, &narrow_hud, &why, phone_aspect));
+    CHECK_EQ(narrow_hud.size(), portrait.size());
+    if (narrow_hud.size() != portrait.size()) return Finish();
+    const auto hud_float = [&](size_t offset) {
+      return std::bit_cast<float>(u32(narrow_hud.data() + 0x810 + offset));
+    };
+    const float width = rb_blitz::ui::PortraitSplash(phone_aspect).width;
+    for (size_t offset : {0x978F4, 0x97CE6}) {
+      CHECK_TRUE(hud_float(offset) * 512 * hud_float(0x49D275) < width);
+      CHECK_TRUE(hud_float(offset) * 512 > hud_float(0x49D102));
+    }
+    CHECK_TRUE(hud_float(0x49D102) > width * .75f);
+    CHECK_TRUE(hud_float(0x49D14B) < hud_float(0x49CC1B));
+    CHECK_TRUE(hud_float(0x49D113) / 2 - hud_float(0x49D07E) <
+               -hud_float(0x49CB2B) - hud_float(0x49CC1B) / 2);
     const size_t touch_shift = at - 0xDA4;
     for (size_t star = 0; star < 5; ++star) {
       for (size_t frame = 0; frame < 5; ++frame) {
@@ -3354,7 +3372,7 @@ int main(int argc, char** argv) {
       CHECK_EQ(instructions, size_t{2});
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 30 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 32 + !landscape.contains("ui/gen/game.dtb") +
         !landscape.contains("ui/loading/gen/loading.dtb") +
         !landscape.contains(rb_blitz::ui::input_font::kHudRecord));
     for (const auto& [path, original] : landscape) {
@@ -3483,6 +3501,22 @@ int main(int argc, char** argv) {
     const auto group_members = [&](const std::vector<uint8_t>& data) {
       return u32(data.data() + 0xAB + object_parent(data, 0x21).size());
     };
+    const auto check_hub_arrow_targets = [&](const auto& objects, float aspect) {
+      const auto layout = rb_blitz::ui::PortraitSongs(aspect);
+      for (const bool right : {false, true}) {
+        const std::string stem = right ? "portrait_header_next" : "portrait_header_previous";
+        const auto& mesh = objects.at(stem + ".mesh");
+        const auto value = [&](size_t offset) { return std::bit_cast<float>(u32(mesh.data() + 0x15 + offset)); };
+        const float width = 300 * value(0), height = 30 * value(20);
+        const float center = value(36) + width / 2;
+        const float arrow_x = layout.width / 2 - rb_blitz::ui::kPortraitSongArrowInset;
+        CHECK_TRUE(std::abs(center - (right ? arrow_x : -arrow_x)) < .001f);
+        CHECK_TRUE(width >= 64 && height >= 52);
+        CHECK_TRUE(width / 2 < std::abs(center));
+        CHECK_TRUE(layout.tabs_z - height / 2 > layout.tools_z + 27.f / 2);
+        CHECK_FALSE(object_showing(objects.at(stem + "_surface.grp"), 0x21));
+      }
+    };
     namespace font = rb_blitz::ui::input_font;
     BeginCase("portrait pause uses native button providers and preserves routing across orientations");
     CHECK_FALSE(landscape.contains(font::kPauseRecord));
@@ -3539,9 +3573,9 @@ int main(int argc, char** argv) {
       const auto panel = stored_objects(scene);
       for (const char* name : {"songs.lst", "subject.lbl", "message.lbl", "portrait_tab_messages.lbl",
                                "portrait_messages_reading.mesh", "portrait_messages_reading_border.mesh",
-                               "portrait_header_previous.mesh", "portrait_header_next.mesh",
                                "portrait_confirm.mesh", "portrait_back.mesh", "InlineHelp.ihp"})
         CHECK_TRUE(panel.contains(name));
+      check_hub_arrow_targets(panel, aspect);
       const auto contains = [](const auto& bytes, std::string_view text) {
         return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
       };
@@ -3607,6 +3641,7 @@ int main(int argc, char** argv) {
                                "portrait_rec_previous.lbl", "portrait_rec_next.lbl", "portrait_rec_empty.lbl",
                                "portrait_rec_position.lbl", "portrait_rec_board_state.grp", "InlineHelp.ihp"})
         CHECK_TRUE(panel.contains(name));
+      check_hub_arrow_targets(panel, aspect);
       CHECK_TRUE(contains(panel.at("recommendations.lst"), "portrait_recommendations.milo"));
       CHECK_TRUE(contains(panel.at("mini_leaders.lst"), "portrait_rec_leaders.milo"));
       CHECK_TRUE(contains(panel.at("description.lbl"), "portrait_splash.milo"));
@@ -3705,6 +3740,8 @@ int main(int argc, char** argv) {
         CHECK_TRUE(records.contains(path));
         const auto objects = stored_objects(records.at(path));
         CHECK_TRUE(objects.contains("portrait_store.color"));
+        if (std::string_view(kind) == "menu" || std::string_view(kind) == "browser")
+          check_hub_arrow_targets(objects, aspect);
         if (std::string_view(kind) != "details") {
           CHECK_TRUE(objects.contains("portrait_tab_store.lbl"));
           const auto& heading = objects.at("portrait_tab_store.lbl");
@@ -3976,9 +4013,9 @@ int main(int argc, char** argv) {
       const auto objects = stored_objects(portrait.at(font::kSongSelectRecord));
       for (const char* name : {"songs.lst", "shortcuts.lst", "portrait_sort.mesh",
                                "portrait_search.mesh", "portrait_song_title.lbl",
-                               "portrait_header_next.mesh",
                                "portrait_song_card.mesh", "shortcuts.grp"})
         CHECK_TRUE(objects.contains(name));
+      check_hub_arrow_targets(objects, config.portrait_aspect);
       CHECK_FALSE(objects.contains("scroll_arrow.tex"));
       CHECK_TRUE(stored_objects(portrait.at(font::kPortraitShortcutsRecord)).contains("list.lbl"));
       CHECK_FALSE(landscape.contains(font::kPortraitShortcutsRecord));
@@ -4102,8 +4139,46 @@ int main(int argc, char** argv) {
       }
       CHECK_TRUE(read("ui/credits/gen/credits.milo_xbox", &source, &why));
       CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitCredits(source, portrait_buttons, aspect, &fitted, &why));
+      const auto credits_scene = stored_objects(fitted);
+      const auto& credits_list = credits_scene.at("credits.lst");
+      constexpr std::string_view credits_resource = "../resource/lists/list_credits.milo";
+      const auto resource = std::search(credits_list.begin(), credits_list.end(),
+                                        credits_resource.begin(), credits_resource.end());
+      CHECK_TRUE(resource != credits_list.end());
+      if (resource == credits_list.end()) return Finish();
+      const uint32_t visible_rows = u32(&*resource + credits_resource.size());
       CHECK_TRUE(read("ui/resource/lists/gen/list_credits.milo_xbox", &source, &why));
       CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitCreditsList(source, aspect, &fitted, &why));
+      const auto directory_end = std::search(fitted.begin() + 0x810, fitted.end(),
+                                             marker.begin(), marker.end());
+      CHECK_TRUE(directory_end != fitted.end());
+      if (directory_end == fitted.end()) return Finish();
+      const float row_step = std::bit_cast<float>(u32(&*directory_end - 25));
+      CHECK_EQ(visible_rows, 6u);
+      CHECK_EQ(row_step, 56.f);
+      const auto credits_rows = stored_objects(fitted);
+      for (const auto& [name, x, alignment] : {std::tuple{"slot_left.lbl", -6.f, 0x14u},
+                                             {"slot_right.lbl", 6.f, 0x11u}}) {
+        const auto& label = credits_rows.at(name);
+        constexpr std::string_view font_path = "../fonts/pentatonic_regularcond.milo";
+        const auto font = std::search(label.begin(), label.end(), font_path.begin(), font_path.end());
+        CHECK_TRUE(font != label.end());
+        if (font == label.end()) return Finish();
+        const auto* style = &*font;
+        const auto* variation = style + font_path.size();
+        const float font_size = std::bit_cast<float>(u32(variation + 4 + u32(variation)));
+        const float column_width = std::bit_cast<float>(u32(style - 33));
+        const float list_z = std::bit_cast<float>(u32(credits_list.data() + 0x19 + 44));
+        const float label_z = std::bit_cast<float>(u32(label.data() + 0x19 + 44));
+        const auto footer = rb_blitz::ui::PortraitFooterAction(aspect, 0, 2);
+        CHECK_EQ(u32(style - 37), alignment);
+        CHECK_EQ(u32(style - 12), 0u);  // Native multiline wrapping.
+        CHECK_EQ(std::bit_cast<float>(u32(label.data() + 0x19 + 36)), x);
+        CHECK_TRUE(font_size > 0 && column_width >= 9 * font_size - .001f);
+        CHECK_TRUE(column_width + std::abs(x) < rb_blitz::ui::PortraitSplash(aspect).width / 2);
+        // Include the incoming/outgoing row as the list advances one position.
+        CHECK_TRUE(list_z + label_z - (visible_rows + 1) * row_step > footer.z + footer.height / 2);
+      }
       CHECK_TRUE(read(rb_blitz::ui::input_font::kConnectionRecord, &source, &why));
       CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitConnection(source, portrait_buttons, aspect, &fitted, &why));
       objects = stored_objects(fitted);
@@ -4201,6 +4276,43 @@ int main(int argc, char** argv) {
     CHECK_EQ(u32(settings_objects.at("InlineHelp.ihp").data() + 13), uint32_t(2));
     CHECK_EQ(std::bit_cast<float>(u32(settings_objects.at("header.lbl").data() + 0x19)), 1.f);
     CHECK_EQ(std::bit_cast<float>(u32(settings_objects.at("header.lbl").data() + 0x19 + 44)), rb_blitz::ui::kPortraitTitleCenter);
+    BeginCase("portrait tutorials share the settings layout and keep the native lesson routes");
+    constexpr char tutorials_dtb[] = "ui/tutorials/gen/tutorials.dtb";
+    constexpr char tutorials_milo[] = "ui/options_menu/gen/settings_tutorials.milo_xbox";
+    CHECK_FALSE(landscape.contains(tutorials_dtb));
+    CHECK_FALSE(landscape.contains(tutorials_milo));
+    auto tutorial_objects = stored_objects(portrait.at(tutorials_milo));
+    for (const char* name : {"options.lst", "InlineHelp.ihp", "portrait_back.mesh"}) {
+      CHECK_TRUE(tutorial_objects.at(name) == settings_objects.at(name));
+    }
+    const auto& title = tutorial_objects.at("header.lbl");
+    constexpr std::string_view tutorial_token = "tutorial";
+    CHECK_TRUE(std::search(title.begin(), title.end(), tutorial_token.begin(), tutorial_token.end()) !=
+               title.end());
+    std::vector<uint8_t> original_tutorials;
+    CHECK_TRUE(read(tutorials_dtb, &original_tutorials, &why));
+    const auto& tutorial_record = portrait.at(tutorials_dtb);
+    std::vector<dtb::Node> tutorial_roots;
+    dtb::RootHeader tutorial_header;
+    CHECK_TRUE(dtb::Parse(tutorial_record.data(), tutorial_record.size(),
+                         &tutorial_roots, &tutorial_header, &why));
+    bool file_updated = false;
+    for (auto& root : tutorial_roots) {
+      if (root.kids.size() < 3 || root.kids[2].text != "tutorials_panel") continue;
+      for (auto& property : root.kids) {
+        if (property.kids.size() != 2 || property.kids[0].text != "file") continue;
+        CHECK_TRUE(property.kids[1].text == "../options_menu/settings_tutorials.milo");
+        property.kids[1].text = "tutorials.milo";
+        file_updated = true;
+      }
+    }
+    CHECK_TRUE(file_updated);
+    dtb::RootHeader original_tutorial_header;
+    std::vector<dtb::Node> original_tutorial_roots;
+    CHECK_TRUE(dtb::Parse(original_tutorials.data(), original_tutorials.size(),
+                         &original_tutorial_roots, &original_tutorial_header, &why));
+    CHECK_TRUE(dtb::Compile(tutorial_roots, tutorial_header) ==
+               dtb::Compile(original_tutorial_roots, original_tutorial_header));
     for (const char* path : {"ui/calibration/gen/cal_welcome.milo_xbox",
                              "ui/calibration/gen/cal_auto.milo_xbox",
                              "ui/calibration/gen/cal_manual.milo_xbox",

@@ -7,6 +7,7 @@
 #include "ui/menu_music_artwork.h"
 #include "ui/menu_music_player_policy.h"
 #include "ui/menu_music_text.h"
+#include "ui/text_marquee.h"
 using namespace rb_blitz;
 using namespace ui::music;
 using test::BeginCase;
@@ -22,7 +23,7 @@ void TextTests() {
              "Bj\xC3\xB6rk and Caf\xC3\xA9");
 
   BeginCase("long titles pause at either end and scroll back to their start");
-  TitleMarquee title;
+  ui::TextMarquee title;
   CHECK_EQ(title.Offset(90, 100, 1, 1), 0);
   CHECK_EQ(title.Offset(100, 100, 1, 25), 0);
   constexpr double start = 100;
@@ -44,6 +45,7 @@ void TextTests() {
   CHECK_EQ(title.Offset(154, 180, 1, 120), 0);
   CHECK_EQ(title.Offset(77, 50, .5f, 123), 0);
   CHECK_EQ(title.Offset(77, 50, .5f, 125.75), 13.5);
+  CHECK_EQ(title.Offset(87, 60, .5f, 126), 0);
 }
 MenuPoint Center(MenuBounds b) {
   return {(b.left + b.right) / 2, (b.top + b.bottom) / 2};

@@ -740,6 +740,15 @@ void PortraitSurface(PortraitScene& scene, const std::vector<uint8_t>& buttons,
   }
 }
 
+void PortraitHubArrowSurfaces(PortraitScene& scene, const std::vector<uint8_t>& buttons,
+                              const ui::PortraitSongsLayout& layout) {
+  for (const bool right : {false, true}) {
+    const auto target = ui::PortraitHubArrowTarget(layout, right);
+    PortraitSurface(scene, buttons, right ? "portrait_header_next" : "portrait_header_previous",
+                    target.width, target.height, target.x, target.z, {});
+  }
+}
+
 void PortraitStoreDialogFrame(PortraitScene& scene, PortraitScene& templates,
                               const ui::PortraitStoreDialogLayout& layout) {
   // The native slot quad supplies the packed vertex format and XZ transform.
@@ -1080,7 +1089,8 @@ bool PreparePortraitPause(const std::vector<uint8_t>& source,
 
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, float aspect,
-                             std::vector<uint8_t>* scene, std::string* error) {
+                             std::vector<uint8_t>* scene, std::string* error,
+                             std::string_view title_token) {
   std::vector<uint8_t> bytes, buttons;
   if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error))
     return false;
@@ -1090,6 +1100,8 @@ bool PreparePortraitSettings(const std::vector<uint8_t>& source,
     return Fail(error, "portrait settings button template revision changed");
   PortraitScene edited(bytes);
   PortraitTitle(edited, aspect);
+  if (!title_token.empty())
+    RenameSceneString(edited.Find("header.lbl")->data, "inline_help_options", title_token);
   PortraitPose(*edited.Find("options.lst"), ui::PortraitSplash(aspect).list_scale, 0, 77);
   RenameSceneString(edited.Find("options.lst")->data, "../resource/lists/list_options_main.milo",
                     "../resource/lists/list_splash.milo");
@@ -1162,7 +1174,10 @@ bool PreparePortraitCredits(const std::vector<uint8_t>& source,
   if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
     return Fail(error, "portrait credits button template revision changed");
   PortraitScene edited(bytes);
-  PortraitPose(*edited.Find("credits.lst"), 1, 0, 147.09f);
+  auto& list = *edited.Find("credits.lst");
+  // The taller rows need fewer display slots to clear the footer during scrolling.
+  PutBe32(list.data.data() + 0xDA, 6);  // UIList display_num
+  PortraitPose(list, 1, 0, 162.09f);
   PortraitFooter(edited, buttons, aspect);
   return PackStored(edited.Build(), scene, error);
 }
@@ -1174,15 +1189,25 @@ bool PreparePortraitCreditsList(const std::vector<uint8_t>& source, float aspect
   if (bytes.size() != 358583 || Crc32(bytes.data(), bytes.size()) != 0x0A08F5BC)
     return Fail(error, "portrait credits list source revision changed");
   PortraitScene edited(bytes);
-  const float width = ui::PortraitSplash(aspect).width * .90f;
+  // Allow four lines of condensed text per row. The column width also limits
+  // the font size on narrow screens so long roles and names stay readable.
+  PutFloat(edited.directory.data() + edited.directory.size() - 29, 56.f);
+  const float width = ui::PortraitSplash(aspect).width * .94f;
+  constexpr float column_inset = 6.f;
+  const float column_width = width / 2 - column_inset;
+  const float column_size = std::min(13.f, column_width / 9);
   for (auto& object : edited.objects) {
     if (object.type != "UILabel") continue;
     const bool column = object.name == "slot_left.lbl" || object.name == "slot_right.lbl";
     if (column) {
+      const float x = object.name == "slot_left.lbl" ? -column_inset : column_inset;
       for (size_t matrix : {size_t(0x19), size_t(0x49)})
-        PutFloat(object.data.data() + matrix + 36, object.name == "slot_left.lbl" ? -6.f : 6.f);
+        PutFloat(object.data.data() + matrix + 36, x);
+      PortraitText(object, column_size, column_width, UINT32_MAX);
+    } else {
+      const float size = object.name == "slot_centered.lbl" ? std::min(12.f, width / 21) : 16.f;
+      PortraitText(object, size, width, UINT32_MAX);
     }
-    PortraitText(object, column ? 13.f : 16.f, column ? (width - 12) / 2 : width, UINT32_MAX);
   }
   return PackStored(edited.Build(), scene, error);
 }
@@ -1698,7 +1723,8 @@ bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
         selected ? ui::kMenuButtonHover : ui::kMenuButtonNormal;
     SceneColor(material, 0x19, color[0], color[1], color[2], color[3]);
     auto mesh = prototype_mesh;
-    const float width = border ? 367.f : 364.5f, height = border ? 55.25f : 52.75f;
+    const float width = ui::kPortraitMenuButtonWidth + (border ? 2.5f : 0.f);
+    const float height = border ? 55.25f : 52.75f;
     for (size_t matrix : {size_t(0x15), size_t(0x45)})
       SceneMatrix(mesh, matrix, width / 405.f, height / 26.f, -192.5f * width / 405.f);
     RenameSceneString(mesh, "highlight.mat", name + ".mat");
@@ -2017,12 +2043,7 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
     edited.objects.push_back(std::move(label));
     edited.Before("sorting.lbl", {name});
   }
-  for (const bool next : {false, true}) {
-    const std::string stem = next ? "portrait_header_next" : "portrait_header_previous";
-    const float x = (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset);
-    PortraitSurface(edited, buttons, stem, ui::kPortraitSongArrowTargetSize,
-                    ui::kPortraitSongArrowTargetSize, x, layout.tabs_z, {});
-  }
+  PortraitHubArrowSurfaces(edited, buttons, layout);
   // Include the new title in the native right-column traversal.
   edited.Before("artist.lbl", {"portrait_song_title.lbl"});
   PortraitSurface(edited, buttons, "portrait_song_card", layout.width, layout.card_height,
@@ -2202,14 +2223,7 @@ bool PreparePortraitStore(const std::vector<uint8_t>& source,
     // The heading remains visible while the menu's loading state switches
     // between main.grp, loading.grp and unavailable.grp.
     edited.Before(menu ? "main.grp" : info ? "song.lbl" : "song.lst", {"portrait_tab_store.lbl"});
-    if (!info) {
-      for (const bool next : {false, true}) {
-        const auto stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
-        PortraitSurface(edited, buttons, stem, ui::kPortraitSongArrowTargetSize,
-                        ui::kPortraitSongArrowTargetSize,
-                        (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
-      }
-    }
+    if (!info) PortraitHubArrowSurfaces(edited, buttons, layout);
     if (menu) label("store_unavailable.lbl", -layout.width * .43f, 30, 17, layout.width * .86f);
     if (info) {
       // Price and artist labels precede the title in the retail draw group.
@@ -2369,11 +2383,8 @@ bool PreparePortraitRecommendations(const std::vector<uint8_t>& source,
     edited.Before("recommendations.lst", {stem + ".lbl"});
     PortraitSurface(edited, buttons, stem, layout.navigation_size, 42,
                     (next ? 1.f : -1.f) * layout.NavigationX(), layout.carousel_z, {});
-    const auto header_stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
-    PortraitSurface(edited, buttons, header_stem, ui::kPortraitSongArrowTargetSize,
-                    ui::kPortraitSongArrowTargetSize,
-                    (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
   }
+  PortraitHubArrowSurfaces(edited, buttons, ui::PortraitSongs(aspect));
   auto empty = *edited.Find("song_title.lbl");
   empty.name = "portrait_rec_empty.lbl";
   PortraitPose(empty, 1, layout.Left(), 90);
@@ -2459,12 +2470,7 @@ bool PreparePortraitMessages(const std::vector<uint8_t>& source,
   PortraitText(heading, 17, layout.width - 76);
   edited.objects.push_back(std::move(heading));
   edited.Before("inbox.grp", {"portrait_tab_messages.lbl"});
-  for (const bool next : {false, true}) {
-    const auto stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
-    PortraitSurface(edited, buttons, stem, ui::kPortraitSongArrowTargetSize,
-                    ui::kPortraitSongArrowTargetSize,
-                    (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
-  }
+  PortraitHubArrowSurfaces(edited, buttons, ui::PortraitSongs(aspect));
   PortraitSurface(edited, buttons, "portrait_messages_reading", layout.width,
                   layout.detail_top - layout.detail_bottom, 0,
                   (layout.detail_top + layout.detail_bottom) / 2, "message.lbl");
@@ -2821,7 +2827,7 @@ bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
   return PackStored(bytes, scene, error);
 }
 bool PrepareGameplayHud(const std::vector<uint8_t>& source, bool portrait, bool touch,
-                        std::vector<uint8_t>* scene, std::string* error) {
+                        std::vector<uint8_t>* scene, std::string* error, float portrait_aspect) {
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
   // Pinned installed HUD: the tail after the inline Flow directories contains
@@ -2830,6 +2836,26 @@ bool PrepareGameplayHud(const std::vector<uint8_t>& source, bool portrait, bool 
   if (bytes.size() != 4838050 || Crc32(bytes.data(), bytes.size()) != 0xA70E19B1)
     return Fail(error, "gameplay HUD source revision changed");
   if (portrait) {
+    const float width = ui::PortraitSplash(portrait_aspect).width;
+    // Both native error-panel proxies inherit the tutorial pane. Fit their
+    // 512-unit artwork horizontally while retaining the height of the rails.
+    for (size_t matrix : {0x978F4, 0x97CE6})
+      PutFloat(bytes.data() + matrix, width * .92f / 512);
+    // Keep the native pop timing and vertical bounce within the side margins.
+    PutFloat(bytes.data() + 0x49D275, 1.06f);
+
+    PortraitObject instructions{"UILabel", "tutorial_instructions.lbl",
+        {bytes.begin() + 0x49D039, bytes.begin() + 0x49D1A8}};
+    PortraitText(instructions, std::min(15.f, width / 14), width * .81f, 0x22, 162);
+    for (size_t matrix : {0x19, 0x49})
+      PutFloat(instructions.data.data() + matrix + 44, 16);
+    std::copy(instructions.data.begin(), instructions.data.end(), bytes.begin() + 0x49D039);
+
+    PortraitObject advance{"UILabel", "tutorial_continue.lbl",
+        {bytes.begin() + 0x49CAE6, bytes.begin() + 0x49CC78}};
+    PortraitText(advance, std::min(19.f, width / 10), width * .81f);
+    std::copy(advance.data.begin(), advance.data.end(), bytes.begin() + 0x49CAE6);
+
     // when_stars_align.anim centers the stock row by moving star0 left as
     // each subsequent star advances right from its predecessor. Keep star0
     // at the pivot and reverse only the X offsets in the remaining tracks.

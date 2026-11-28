@@ -4,6 +4,8 @@
 
 #include <cfloat>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 int main() {
   ImGui::CreateContext();
@@ -50,6 +52,48 @@ int main() {
       }
     }
   }
+  using namespace rb_blitz::ui::help;
+  constexpr std::string_view long_caption =
+      "Keep your settings until the next song, then return to the menu to apply the changes.";
+  bool saw_portrait_overflow = false;
+  for (const auto viewport : {ImVec2(140, 304), ImVec2(280, 608), ImVec2(360, 640), ImVec2(1280, 720)}) {
+    for (const char* size : {"normal", "big", "biggest"}) {
+      const auto layout = LayoutCaption(viewport.x, viewport.y, size);
+      const auto lines = WrapCaption(long_caption,
+          [&](const char* begin, const char* end) {
+            return caption->CalcWordWrapPosition(layout.font_size, begin, end, layout.TextWidth());
+          },
+          [&](std::string_view line) {
+            return caption->CalcTextSizeA(layout.font_size, FLT_MAX, 0,
+                                          line.data(), line.data() + line.size()).x;
+          });
+      std::string reassembled;
+      for (const auto& line : lines) {
+        if (!reassembled.empty()) reassembled += ' ';
+        reassembled += line.text;
+        ok &= line.width <= layout.TextWidth() + .01f;
+      }
+      ok &= reassembled == long_caption;
+      const size_t visible = std::min(lines.size(), layout.LineCapacity());
+      const float panel_height = layout.font_size * visible + 2 * layout.pad_y;
+      ok &= panel_height <= layout.bottom - layout.top + .001f;
+      saw_portrait_overflow |= viewport.x < viewport.y && lines.size() > visible;
+      // At each pause, the text window must show complete lines. Every line
+      // should get a pause somewhere in the cycle.
+      CaptionScroll scroll;
+      std::vector<bool> shown(lines.size(), false);
+      for (int frame = 0; frame < 600; ++frame) {
+        const float offset = scroll.Offset(layout, lines.size(), 1, frame / 10.0);
+        if (offset != std::floor(offset)) continue;
+        const auto first = static_cast<size_t>(offset);
+        ok &= first + visible <= shown.size();
+        for (size_t i = first; i < std::min(first + visible, shown.size()); ++i) shown[i] = true;
+      }
+      ok &= std::ranges::all_of(shown, [](bool value) { return value; });
+    }
+  }
+  ok &= saw_portrait_overflow;
+  if (!ok) std::fprintf(stderr, "A caption lost words, exceeded the strip, or skipped a reading position\n");
   ImGui::DestroyContext();
   return ok ? 0 : 1;
 }

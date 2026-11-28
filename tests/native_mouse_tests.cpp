@@ -6,6 +6,7 @@
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
 #include "input/dialog_target.h"
+#include "input/menu_marquee.h"
 #include "ui/portrait_dialog_state.h"
 #include <atomic>
 #include <thread>
@@ -348,6 +349,27 @@ int main() {
     CHECK_FALSE(InlineHelpGlyphBounds(label, read_word, read_float));
     CHECK_FALSE(ReadingGlyphsOutside(label, -9, 11, read_word, read_float));
     CHECK_FALSE(InlineHelpGlyphBounds(0, read_word, read_float));
+  }
+  BeginCase("menu marquees clip and preserve the texture of partially visible glyphs");
+  {
+    const std::array<GlyphEdgeVertex, 4> glyph{
+        {{10, .25f}, {10, .25f}, {30, .75f}, {30, .75f}}};
+    const auto clipped = ClipMenuGlyph(glyph, -10, 5, 15);
+    for (const auto corner : {0, 1}) {
+      CHECK_EQ(clipped[corner].x, 5.f);
+      CHECK_EQ(clipped[corner].u, .375f);
+    }
+    for (const auto corner : {2, 3}) {
+      CHECK_EQ(clipped[corner].x, 15.f);
+      CHECK_EQ(clipped[corner].u, .625f);
+    }
+    const auto hidden = ClipMenuGlyph(glyph, -50, 5, 15);
+    for (const auto& vertex : hidden) CHECK_EQ(vertex.x, 5.f);
+    const auto visible = ClipMenuGlyph(glyph, -10, -5, 25);
+    for (size_t i = 0; i < glyph.size(); ++i) {
+      CHECK_EQ(visible[i].x, glyph[i].x - 10);
+      CHECK_EQ(visible[i].u, glyph[i].u);
+    }
   }
   BeginCase("pause and native song confirmations retain the gameplay resolution");
   for (const auto screen : {"game_screen", "pause_confirm_quit_song_screen",

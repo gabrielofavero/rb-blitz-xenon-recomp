@@ -2295,6 +2295,13 @@ void TestPortraitLabels() {
       for (const auto& entry : labels) if (entry.first == key) return entry.second;
       return std::string();
     };
+    CHECK_TRUE(label(landscape, "settings_title_settings_rhythmverse_filter_panel") ==
+               "RHYTHMVERSE FILTERS");
+    CHECK_TRUE(label(portrait, "settings_title_settings_rhythmverse_filter_panel") == "FILTERS");
+    for (const auto& labels : {landscape, portrait}) {
+      CHECK_TRUE(label(labels, "settings_rv_guitar_on") == "Guitar: Required");
+      CHECK_TRUE(label(labels, "settings_rv_guitar_off") == "Guitar: Optional");
+    }
     CHECK_TRUE(label(portrait, "settings_achievements") == "Unlocks");
     CHECK_TRUE(label(portrait, "settings_title_settings_achievements_panel") == "UNLOCKS");
     CHECK_TRUE(label(portrait, "settings_title_settings_controller_layout_panel") == "LAYOUT");
@@ -3720,18 +3727,51 @@ void TestSettingsLabelsRow() {
       CHECK_TRUE(layout.bottom <= height * 0.865f);
       CHECK_TRUE(layout.width <= width);
       CHECK_TRUE(layout.font_size <= layout.TextHeight() + 0.001f);
+      CHECK_TRUE(layout.LineCapacity() * layout.font_size <= layout.TextHeight() + 0.001f);
       if (height >= 360) CHECK_TRUE(layout.font_size > previous);
       previous = layout.font_size;
     }
   }
   const auto fits = [](const std::string& text) { return text.size() <= 20; };
-  const auto shortened = rb_blitz::ui::help::FitCaption("A long description that cannot fit in this test area.", fits);
+  const auto shortened = rb_blitz::ui::help::FitCaption(
+      "A long description that cannot fit in this test area.", fits);
   CHECK_TRUE(fits(shortened));
   CHECK_TRUE(shortened.ends_with("..."));
   CHECK_TRUE(shortened == "A long...");
   CHECK_TRUE(rb_blitz::ui::help::FitCaption("Short text.", fits) == "Short text.");
   CHECK_TRUE(rb_blitz::ui::help::FitCaption("Too small.", [](const auto&) { return false; }).empty());
+  using rb_blitz::ui::help::CaptionScroll;
+  using rb_blitz::ui::help::LayoutCaption;
+  const auto portrait = LayoutCaption(280, 608, "biggest");
+  CHECK_TRUE(portrait.TextWidth() > LayoutCaption(280, 608, "biggest", false).TextWidth());
+  CHECK_TRUE(portrait.LineCapacity() >= 2);
+  const auto fit = portrait.LineCapacity();
+  CaptionScroll scroll;
+  CHECK_EQ(scroll.Offset(portrait, fit, 1, 1), 0);
+  CHECK_EQ(scroll.Offset(portrait, fit, 1, 10), 0);
 
+  BeginCase("overflowing captions pause on whole lines and return to their first line");
+  const auto offset = [&](double elapsed) { return scroll.Offset(portrait, fit + 3, 1, 20 + elapsed); };
+  CHECK_EQ(offset(0), 0);
+  CHECK_EQ(offset(2.59), 0);
+  CHECK_TRUE(offset(2.75) > 0 && offset(2.75) < 1);
+  CHECK_EQ(offset(3.1), 1);
+  CHECK_EQ(offset(4.4), 1);
+  CHECK_EQ(offset(5.1), 2);
+  CHECK_EQ(offset(7.2), 3);
+  CHECK_EQ(offset(9.8), 3);
+  CHECK_TRUE(offset(10.2) > 0 && offset(10.2) < 3);
+  CHECK_EQ(offset(10.6), 0);
+
+  BeginCase("caption scrolling restarts when the caption, layout, or visibility changes");
+  CHECK_EQ(offset(14), 1);
+  CHECK_EQ(scroll.Offset(portrait, fit + 3, 2, 34), 0);
+  CHECK_EQ(scroll.Offset(portrait, fit + 3, 2, 38), 1);
+  const auto resized = LayoutCaption(320, 608, "biggest");
+  CHECK_EQ(scroll.Offset(resized, fit + 3, 2, 38), 0);
+  CHECK_EQ(scroll.Offset(resized, fit + 3, 2, 42), 1);
+  scroll.Reset();
+  CHECK_EQ(scroll.Offset(resized, fit + 3, 2, 42), 0);
 }
 
 // R7: the visible action wording is exactly "Unlock Online Achievements" - the achievement grant the
@@ -4532,7 +4572,7 @@ void TestRhythmVerseRows() {
     }
     if (label.first == "settings_rv_guitar_on") {
       guitar_on = true;
-      CHECK_TRUE(label.second == "Guitar: On");
+      CHECK_TRUE(label.second == "Guitar: Required");
     }
     if (label.first == "settings_menu_music") {
       menu_title = true;

@@ -3202,11 +3202,24 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
   if (portrait_interface) {
-    std::vector<uint8_t> buttons, scene;
+    std::vector<uint8_t> buttons, scene, tutorials_scene;
+    const auto aspect = screen::CurrentMenuConfiguration().portrait_aspect;
     if (!read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitSettings(built[screen::kSceneRecord], buttons,
-            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+            aspect, &scene, error) ||
+        !ui::input_font::PreparePortraitSettings(built[screen::kSceneRecord], buttons,
+            aspect, &tutorials_scene, error, "tutorial") ||
+        !edit("ui/tutorials/gen/tutorials.dtb", [&](auto& roots) {
+          auto* file = PanelMethod(&roots, "tutorials_panel", "file");
+          if (!file || file->kids.size() != 2 || file->kids[1].text != "tutorials.milo") {
+            if (error) *error = "tutorials panel scene changed";
+            return false;
+          }
+          file->kids[1].text = "../options_menu/settings_tutorials.milo";
+          return true;
+        })) return false;
     built[screen::kSceneRecord] = std::move(scene);
+    built["ui/options_menu/gen/settings_tutorials.milo_xbox"] = std::move(tutorials_scene);
   }
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
   if (!read("ui/av_options/gen/av_options.milo_xbox",
@@ -3293,7 +3306,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     std::vector<uint8_t> source;
     if (!read(ui::input_font::kHudRecord, &source, error) ||
         !ui::input_font::PrepareGameplayHud(source, portrait_hud, touch_hud,
-                                           &built[ui::input_font::kHudRecord], error))
+                                           &built[ui::input_font::kHudRecord], error,
+                                           screen::CurrentMenuConfiguration().portrait_aspect))
       return false;
   }
   {

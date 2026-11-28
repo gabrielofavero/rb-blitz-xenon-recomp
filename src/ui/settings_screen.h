@@ -223,9 +223,8 @@ inline constexpr char kPlayProbePrefix[] = "rbbz-play/current/";
 // methods the payload writes into `ui/store/gen/store.dtb` (`store::AddSearchKeyboard`). Nothing
 // of the search surface is drawn from this record any more.
 
-// The **Filters** page (plan P9-3/P9-7), titled `RHYTHMVERSE FILTERS`. Listed by the RhythmVerse
-// page, and reached from the store's own Start button (whose footer caption is `FILTERS` since
-// 2026-10-23): the payload re-points both store screens' Start cases here
+// The Filters page is listed by the RhythmVerse page and reached from the store's Filters button.
+// The payload re-points both store screens' Start cases here
 // (`store::RouteStoreStartToFilter`), and the back target is runtime state - Help & Options enters
 // it from the RhythmVerse page, the store from its front menu (both through `EnterScreen`'s
 // "point the destination back at whoever sent us" statement, or the store's own equivalent).

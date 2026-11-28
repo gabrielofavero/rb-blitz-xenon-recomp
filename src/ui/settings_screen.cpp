@@ -388,6 +388,14 @@ Row BoolRow(const char* symbol, const char* setting, const char* label, const ch
   return row;
 }
 
+Row ChartFilterRow(const char* symbol, const char* setting, const char* label,
+                   const char* description) {
+  Row row = BoolRow(symbol, setting, label, description);
+  row.on_label = row.label + ": Required";
+  row.off_label = row.label + ": Optional";
+  return row;
+}
+
 // A row whose two states name a visibility rather than On/Off. `_on` is the setting true state
 // (the main-menu row is hidden), so it draws "Hidden"; `_off` draws "Visible".
 Row VisibilityRow(const char* symbol, const char* setting, const char* label,
@@ -1089,23 +1097,20 @@ std::vector<PanelSpec> AllPanels() {
                                          "Require charts for chosen instruments."),
                           }});
 
-  // 1b-ii. Filters (plan P6 §1.6): one boolean per instrument, On = that chart is required, Off =
-  // no condition, so all five off means no instrument constraint at all. The labels are the
-  // instrument names a player already reads on the retail surfaces. The page is also the store's
-  // Start destination since P9-7 (`kRhythmVerseFilterScreen`); its title is `RHYTHMVERSE FILTERS`.
+  // Required charts constrain store results. Optional charts impose no condition.
   out.push_back(PanelSpec{kRhythmVerseFilterPanel,
                           kRhythmVerseFilterScreen, "settings_rhythmverse_screen", MenuPanels(),
                           {
-                              BoolRow("settings_rv_guitar", "general.rhythmverse_guitar", "Guitar",
-                                      "Require a guitar chart."),
-                              BoolRow("settings_rv_bass", "general.rhythmverse_bass", "Bass",
-                                      "Require a bass chart."),
-                              BoolRow("settings_rv_drums", "general.rhythmverse_drums", "Drums",
-                                      "Require a drum chart."),
-                              BoolRow("settings_rv_vocals", "general.rhythmverse_vocals", "Vocals",
-                                      "Require a vocal chart."),
-                              BoolRow("settings_rv_keys", "general.rhythmverse_keys", "Keys",
-                                      "Require a keys chart."),
+                              ChartFilterRow("settings_rv_guitar", "general.rhythmverse_guitar", "Guitar",
+                                             "Require a guitar chart."),
+                              ChartFilterRow("settings_rv_bass", "general.rhythmverse_bass", "Bass",
+                                             "Require a bass chart."),
+                              ChartFilterRow("settings_rv_drums", "general.rhythmverse_drums", "Drums",
+                                             "Require a drum chart."),
+                              ChartFilterRow("settings_rv_vocals", "general.rhythmverse_vocals", "Vocals",
+                                             "Require a vocal chart."),
+                              ChartFilterRow("settings_rv_keys", "general.rhythmverse_keys", "Keys",
+                                             "Require a keys chart."),
                           }});
 
   // 1c. Achievements & Unlocks. Notification visibility is native; grants need Ultimate.
@@ -3937,6 +3942,7 @@ std::vector<std::pair<std::string, std::string>> Labels(const bool portrait) {
     // Match complete names, including their uppercase page titles, and retain
     // state/availability suffixes. Main-menu entries keep their own wording.
     static constexpr std::pair<std::string_view, std::string_view> compact[] = {
+        {"RhythmVerse Filters", "Filters"},
         {"Achievements & Unlocks", "Unlocks"},
         {"Unlock Online Achievements", "Unlock Online Ac."},
         {"Download Content", "Download Cont."},
