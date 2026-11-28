@@ -108,7 +108,7 @@ bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
 // Derive persistent native buttons and a selection cell for the six portrait rows.
 bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
-                               std::string* error);
+                               std::string* error, bool input_icons = false);
 bool PreparePortraitCalibrationList(const std::vector<uint8_t>& source,
                                     const std::vector<uint8_t>& button_source,
                                     std::vector<uint8_t>* scene, std::string* error);

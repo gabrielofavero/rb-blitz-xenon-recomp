@@ -127,6 +127,9 @@ thread_local MenuPoint drawing_panel_translation;
 std::string_view DrawScreenName() {
   return drawing_panel_screen.empty() ? std::string_view(current_screen_name) : drawing_panel_screen;
 }
+bool ControllerPresetScreen(std::string_view screen) {
+  return screen == "controller_config_screen" || screen == "controller_config_pause_screen";
+}
 bool PortraitStoreActive() {
   return ui::screen::CurrentMenuConfiguration().rhythmverse_row && ui::PortraitStoreScreen(DrawScreenName());
 }
@@ -463,7 +466,7 @@ bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, Menu
     REXLOG_INFO("native_mouse: scrollbar first={} target={} row={} dir={}", current, first, row, direction);
   return true;
 }
-std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point);
+std::optional<MouseAction> LandscapePresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point);
 }
 
 bool MouseSupportEnabled() { return true; }
@@ -804,6 +807,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   const bool powerup_info = powerup_info_screen == current_screen &&
       powerup_info_frame + 1 == frame_number;
+  const bool controller_presets = ControllerPresetScreen(current_screen_name);
   // Footer labels act on the existing selection. Handle them before row hit
   // testing, which would otherwise reject a footer click as empty space.
   // Touch-generated left presses use this same queue as physical mouse clicks.
@@ -834,6 +838,9 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       if (queue.enabled()) queue.PulseButton(button);
       return;
     }
+    // On the portrait preset page, only the rendered arrows and footer
+    // buttons can activate an action.
+    if (controller_presets && settings::InterfacePortraitEnabled() && !current_input_scope) return;
     // One line per press, bounded to the first 24 misses in a screen. This is
     // useful on devices where we cannot attach a debugger to inspect hit areas.
     static thread_local uint32_t traced_screen = 0;
@@ -955,12 +962,12 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
         return;
       }
     }
-    if (const auto arrow = PresetArrowAt(ctx, base, event->point)) {
-      // The art belongs to the guest's preset page. A controller D-pad pulse
-      // reaches its own left/right handler, including its normal wrap behavior.
-      Select(ctx, base, event->point); // retire any mouse-owned list hover
-      scroll_follow.Reset();
-      event->action = *arrow;
+    if (controller_presets) {
+      if (const auto arrow = LandscapePresetArrowAt(ctx, base, event->point)) {
+        Select(ctx, base, event->point);
+        scroll_follow.Reset();
+        event->action = *arrow;
+      }
     }
   }
   // A dialog consumes empty-space clicks. Its own captured list still supports
@@ -1387,8 +1394,7 @@ void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const bool recommendations = DrawScreenName() == "recommendation_screen";
   const bool songs = DrawScreenName() == "song_select_screen" || store || messages || recommendations;
   if (!settings::InterfacePortraitEnabled() ||
-      (DrawScreenName() != "controller_config_screen" &&
-       DrawScreenName() != "controller_config_pause_screen" && !songs)) return;
+      (!ControllerPresetScreen(DrawScreenName()) && !songs)) return;
   const auto header = ObjectBase(base, label);
   if (ObjectName(base, header) != (songs ? (recommendations ? "portrait_tab_recs.lbl" : messages ? "portrait_tab_messages.lbl" :
       store ? "portrait_tab_store.lbl" : "portrait_tab_songs.lbl") : "IndexNum.lbl")) return;
@@ -1398,10 +1404,10 @@ void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
     const std::string stem = songs ? (left ? "portrait_header_previous" : "portrait_header_next") :
                                     (left ? "portrait_previous" : "portrait_next");
     const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false, !songs);
-    if (songs && !current_input_scope) {
+    if ((songs || menu_available) && !current_input_scope) {
       const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
       if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt)
-        CaptureHintTarget(*bounds, left ? 0x0100 : 0x0200);
+        CaptureHintTarget(*bounds, songs ? (left ? 0x0100 : 0x0200) : (left ? 0x0004 : 0x0008));
     }
     if (songs) continue; // The background panel draws and animates the retail header arrows.
     for (bool glow : {false, true}) {
@@ -1447,42 +1453,18 @@ void CaptureSlider(PPCContext& ctx, uint8_t* base, uint32_t slider) {
 
 
 namespace {
-std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
-  if (DrawScreenName() != "controller_config_screen" &&
-      DrawScreenName() != "controller_config_pause_screen") return {};
-  // Resolve the authored controller_config.milo_xbox arrows only on a click so placement
-  // and aspect changes use the scene's current transforms at minimal cost.
+std::optional<MouseAction> LandscapePresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   const uint32_t panel = U32(base, current_screen + 52);
   const uint32_t dir = panel ? U32(base, panel + 52) : 0;
   const uint32_t left = dir ? SceneMesh(ctx, base, dir, "arrow_lt.mesh") : 0;
   const uint32_t right = dir ? SceneMesh(ctx, base, dir, "arrow_rt.mesh") : 0;
-  auto left_bounds = left ? ProjectMesh(ctx, base, left) : std::nullopt;
-  auto right_bounds = right ? ProjectMesh(ctx, base, right) : std::nullopt;
-  if (rb_blitz::settings::InterfacePortraitEnabled()) {
-    const auto previous = dir ? SceneMesh(ctx, base, dir, "portrait_previous.mesh") : 0;
-    const auto next = dir ? SceneMesh(ctx, base, dir, "portrait_next.mesh") : 0;
-    if (previous) left_bounds = ProjectMesh(ctx, base, previous);
-    if (next) right_bounds = ProjectMesh(ctx, base, next);
-  }
-  auto hit = HitMenuArrow(point, left_bounds, right_bounds);
-  if (!hit && rb_blitz::settings::InterfacePortraitEnabled()) {
-    const float width = ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width;
-    const float half = 19.f / width;
-    hit = HitMenuArrow(point,
-        MenuBounds{.14f - half, .5f - 129.f / 480, .14f + half, .5f - 91.f / 480},
-        MenuBounds{.86f - half, .5f - 129.f / 480, .86f + half, .5f - 91.f / 480});
-  }
-  // The static meshes do not always yield a usable projected box. The authored
-  // panel keeps both arrows at these guest coordinates; MenuPointer already
-  // accounts for the window's size and presentation rectangle. These narrow
-  // targets keep a click on the visible art from falling through to Confirm.
-  if (!hit && !rb_blitz::settings::InterfacePortraitEnabled())
-    hit = HitMenuArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
+  const auto left_bounds = left ? ProjectMesh(ctx, base, left) : std::nullopt;
+  const auto right_bounds = right ? ProjectMesh(ctx, base, right) : std::nullopt;
+  if (const auto hit = HitMenuArrow(point, left_bounds, right_bounds)) return hit;
+  // The landscape meshes can lack projected bounds. Use their authored
+  // positions as a fallback, mapped through the presentation rectangle.
+  return HitMenuArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
                       MenuBounds{.622f, .31f, .635f, .35f});
-  REXLOG_INFO("native_mouse: preset click point={},{} panel={:08X} dir={:08X} meshes={:08X}/{:08X} projected={}/{} action={}",
-              point.x, point.y, panel, dir, left, right, left_bounds.has_value(),
-              right_bounds.has_value(), hit ? (*hit == MouseAction::kLeft ? "left" : "right") : "confirm");
-  return hit;
 }
 }
 
@@ -2081,6 +2063,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const bool calibration_title = calibration && (name == "audio_title.lbl" || name == "video_title.lbl");
   const bool title = calibration_title || (portrait && name == "header.lbl" &&
       ui::PortraitSplashScreen(DrawScreenName(), current_panel_name, current_panel_scene));
+  const bool fit_title = calibration_title || (title && ControllerPresetScreen(DrawScreenName()));
   constexpr float kLandscapeTitleWidth = 480.f;
   const float title_width = title && settings_title
       ? ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .94f
@@ -2180,7 +2163,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
         ? ui::PortraitPowerups(ui::screen::CurrentMenuConfiguration().portrait_aspect).title_z
         : ui::kPortraitTitleCenter);
   }
-  if (instruction || calibration_title) {
+  if (instruction || fit_title) {
     if (instruction) {
       x = portrait_draw_fit.X(0);
       z = portrait_draw_fit.Z(ui::kPortraitCalibrationInstructionsZ);

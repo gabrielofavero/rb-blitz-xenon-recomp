@@ -3609,7 +3609,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     built[ui::input_font::kConnectionRecord] = std::move(scene);
     if (!read(ui::input_font::kSplashListRecord, &source, error) ||
         !read(ui::input_font::kListRecord, &buttons, error) ||
-        !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error)) return false;
+        !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error,
+            built.contains(ui::input_font::kIconSceneRecord))) return false;
     built[ui::input_font::kSplashListRecord] = std::move(scene);
     if (!ui::input_font::PreparePortraitCalibrationList(source, buttons, &scene, error)) return false;
     built[ui::input_font::kPortraitCalibrationListRecord] = std::move(scene);

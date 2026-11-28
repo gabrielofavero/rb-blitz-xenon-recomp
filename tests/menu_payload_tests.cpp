@@ -3502,6 +3502,39 @@ int main(int argc, char** argv) {
         objects[names[i]] = {bytes + markers[i] + 4, bytes + markers[i + 1] + 4};
       return objects;
     };
+    BeginCase("portrait settings labels render binding icons in their own font style");
+    namespace font = rb_blitz::ui::input_font;
+    const auto list_objects = stored_objects(portrait.at(font::kSplashListRecord));
+    const auto& binding_label = list_objects.at("button.lbl");
+    CHECK_EQ(binding_label.at(0xCC), uint8_t(1));  // markup
+    CHECK_EQ(u32(binding_label.data() + 0xD9), 2u);
+    size_t style_at = 0xDD;
+    const auto style_reference = [&] {
+      const auto length = u32(binding_label.data() + style_at);
+      style_at += 4;
+      const std::string value(reinterpret_cast<const char*>(binding_label.data() + style_at), length);
+      style_at += length;
+      return value;
+    };
+    CheckStrEq(style_reference(), "../fonts/portrait_splash.milo");
+    CheckStrEq(style_reference(), "UIColor.color");
+    CHECK_EQ(u32(binding_label.data() + style_at), std::bit_cast<uint32_t>(27.5f));
+    style_at += 5 * sizeof(float);
+    CHECK_TRUE(style_at < binding_label.size() - 12);
+    if (style_at >= binding_label.size() - 12) return Finish();
+    CheckStrEq(style_reference(), "../fonts/input_icons.milo");
+    CheckStrEq(style_reference(), "input_icons.color");
+    CHECK_EQ(u32(binding_label.data() + style_at), std::bit_cast<uint32_t>(22.3f));
+    style_at += 5 * sizeof(float);
+    CHECK_EQ(binding_label.size(), style_at + 12);
+    CHECK_EQ(u32(binding_label.data() + style_at), 0u);
+    CHECK_EQ(u32(binding_label.data() + style_at + 4), 0u);
+    CHECK_EQ(u32(binding_label.data() + style_at + 8), 0xADDEADDEu);
+    CHECK_TRUE(portrait.contains(font::kIconSceneRecord));
+    const auto& icon_color = list_objects.at("input_icons.color");
+    for (size_t component = 0; component < 4; ++component)
+      CHECK_EQ(u32(icon_color.data() + 0x11 + component * sizeof(float)),
+               std::bit_cast<uint32_t>(1.f));
     const auto scene_root = [&](const std::vector<uint8_t>& packed) {
       const auto* bytes = packed.data() + 0x810;
       const size_t at = 8 + u32(bytes + 4);
@@ -3535,7 +3568,6 @@ int main(int argc, char** argv) {
         CHECK_FALSE(object_showing(objects.at(stem + "_surface.grp"), 0x21));
       }
     };
-    namespace font = rb_blitz::ui::input_font;
     BeginCase("portrait pause uses native button providers and preserves routing across orientations");
     CHECK_FALSE(landscape.contains(font::kPauseRecord));
     CHECK_TRUE(portrait.contains(font::kPauseRecord));
@@ -4500,7 +4532,20 @@ int main(int argc, char** argv) {
     };
     CHECK_TRUE(std::abs(speaker_field(36) + speaker_field(0) * 223.3656f) < .001f);
     CHECK_TRUE(std::abs(speaker_field(44) + speaker_field(32) * 39.78075f - rb_blitz::ui::kPortraitCalibrationSpeakerZ) < .001f);
-    const auto presets = stored_objects(portrait.at("ui/controller_config/gen/controller_config.milo_xbox"));
+    BeginCase("portrait presets fit the full controller diagram and callouts");
+    const auto presets = stored_objects(portrait.at(font::kControllerSceneRecord));
+    const auto field = [&](const char* name, size_t offset) {
+      return std::bit_cast<float>(u32(presets.at(name).data() + offset));
+    };
+    const float canvas_width = rb_blitz::ui::PortraitSplash(config.portrait_aspect).width;
+    const float diagram_scale = field("all.grp", 0x21);
+    CHECK_TRUE(diagram_scale > 0);
+    CHECK_TRUE(std::abs(diagram_scale - field("set_3.grp", 0x21)) < .001f);
+    for (const char* name : {"deploy_2_lt.lbl", "switch_track_rt_0.lbl"}) {
+      const float anchor = field(name, 0x19 + 36);
+      const float outer_edge = (std::abs(anchor) + 160) * diagram_scale;
+      CHECK_TRUE(outer_edge < canvas_width * .45f);
+    }
     CHECK_TRUE(presets.contains("portrait_previous.mesh"));
     CHECK_TRUE(presets.contains("portrait_next.mesh"));
     CHECK_EQ(object_showing(presets.at("portrait_preset_arrows.grp"), 0x21), uint8_t(0));

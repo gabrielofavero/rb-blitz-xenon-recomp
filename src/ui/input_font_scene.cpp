@@ -45,6 +45,30 @@ void PutBe32(uint8_t* p, uint32_t value) {
   for (unsigned i = 0; i != 4; ++i) p[i] = uint8_t(value >> (24 - 8 * i));
 }
 void PutFloat(uint8_t* p, float value) { PutBe32(p, std::bit_cast<uint32_t>(value)); }
+void SceneWord(std::vector<uint8_t>& out, uint32_t value) {
+  const auto at = out.size(); out.resize(at + 4); PutBe32(out.data() + at, value);
+}
+void SceneString(std::vector<uint8_t>& out, std::string_view value) {
+  SceneWord(out, uint32_t(value.size())); out.insert(out.end(), value.begin(), value.end());
+}
+
+void AddInputIconStyle(std::vector<uint8_t>& label, size_t count, size_t metrics,
+                       std::string_view color) {
+  // UILabel revision 29 stores five floats per style, then one separate
+  // material-variation string per style which PostLoad reads.
+  constexpr size_t kStyleMetricsSize = 5 * sizeof(float);
+  const size_t end = metrics + kStyleMetricsSize;
+  std::vector<uint8_t> style;
+  SceneString(style, "../fonts/input_icons.milo");
+  SceneString(style, color);
+  const auto icon_metrics = style.size();
+  style.insert(style.end(), label.begin() + metrics, label.begin() + end);
+  PutFloat(style.data() + icon_metrics, 22.3f);
+  PutBe32(label.data() + count, 2);
+  label.insert(label.begin() + end, style.begin(), style.end());
+  label.insert(label.begin() + end + style.size() + 4, 4, 0);
+}
+
 bool Fail(std::string* error, const char* message) {
   if (error) *error = message;
   return false;
@@ -336,31 +360,9 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
       Be32(bytes.data() + end + 4) != 0xADDEADDE ||
       Be32(bytes.data() + 0x16296) != 0x41A23D60)
     return Fail(error, "mapping label style record changed");
-  std::vector<uint8_t> added;
-  auto string = [&](std::string_view value) {
-    const size_t at = added.size();
-    added.resize(at + 4 + value.size());
-    PutBe32(added.data() + at, static_cast<uint32_t>(value.size()));
-    std::copy(value.begin(), value.end(), added.begin() + at + 4);
-  };
-  auto style = [&](std::string_view resource, std::string_view color) {
-    string(resource);
-    string(color);
-    const size_t metrics = added.size();
-    added.insert(added.end(), bytes.begin() + 0x16296, bytes.begin() + end);
-    // The icon style is independent of the label text. Give the existing
-    // keycap artwork a few more screen pixels without changing its silhouette.
-    PutFloat(added.data() + metrics, 22.3f);
-  };
   // Each style must have a distinct font/material. A duplicate primary-font
   // style overwrites the primary material's hover tint in DrawShowing.
-  style("../fonts/input_icons.milo", "active_focused.color");
-  PutBe32(bytes.data() + count, 2);
-  bytes.insert(bytes.begin() + end, added.begin(), added.end());
-  // UILabel::PostLoad (824BC3E0) consumes one additional material-variation
-  // string per style, after PreLoad has consumed the style array. Preserve
-  // the primary style's empty string and append the icon style's empty string.
-  bytes.insert(bytes.begin() + end + added.size() + 4, 4, 0);
+  AddInputIconStyle(bytes, count, 0x16296, "active_focused.color");
   return PackStored(bytes, scene, error);
 }
 bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_t>* scene,
@@ -484,12 +486,6 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
 }
 namespace {
 struct PortraitObject { std::string type, name; std::vector<uint8_t> data; };
-void SceneWord(std::vector<uint8_t>& out, uint32_t value) {
-  const auto at = out.size(); out.resize(at + 4); PutBe32(out.data() + at, value);
-}
-void SceneString(std::vector<uint8_t>& out, std::string_view value) {
-  SceneWord(out, uint32_t(value.size())); out.insert(out.end(), value.begin(), value.end());
-}
 void RenameSceneString(std::vector<uint8_t>& out, std::string_view from, std::string_view to) {
   for (size_t at = 4; at + from.size() <= out.size(); ++at) {
     if (Be32(out.data() + at - 4) != from.size() ||
@@ -1250,7 +1246,10 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
   PortraitScene edited(bytes);
   // Body transforms remain separate from the fixed title and footer. Root
   // scaling is only the fallback for native calibration art, not menu controls.
-  const float scale = std::min(width * (presets ? .94f / 540.f : .90f / 600.f), 1.f);
+  // The preset diagram extends past its leader lines. The furthest callout
+  // anchor is 154 units from center plus a 160-unit text box.
+  constexpr float kPresetDiagramWidth = 660;
+  const float scale = std::min(width * .90f / (presets ? kPresetDiagramWidth : 600.f), 1.f);
   // Panel loading can reset the directory transform. Author content against an
   // identity root so its loaded and runtime poses agree.
   if (welcome)
@@ -1676,7 +1675,7 @@ bool PreparePortraitSplash(const std::vector<uint8_t>& source,
 
 bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
-                               std::string* error) {
+                               std::string* error, bool input_icons) {
   std::vector<uint8_t> bytes, buttons;
   if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error)) return false;
   if (bytes.size() != 4423 || Crc32(bytes.data(), bytes.size()) != 0x4B1EEE24)
@@ -1709,12 +1708,25 @@ bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
     objects.push_back({std::move(type), std::move(name),
         {bytes.begin() + markers[i] + 4, bytes.begin() + markers[i + 1] + 4}});
   }
-  for (auto& object : objects)
-    if (object.name == "button.lbl")
-      RenameSceneString(object.data, "../fonts/pentatonic.milo", "../fonts/portrait_splash.milo");
+  constexpr std::string_view kIconColor = "input_icons.color";
+  for (auto& object : objects) {
+    if (object.name != "button.lbl") continue;
+    if (input_icons) {
+      // Settings binding rows carry <alt1> glyphs through this label.
+      object.data[0xCC] = 1;  // markup
+      AddInputIconStyle(object.data, 0xD9, 0x10A, kIconColor);
+    }
+    RenameSceneString(object.data, "../fonts/pentatonic.milo", "../fonts/portrait_splash.milo");
+  }
   auto original = [&](std::string_view name) {
     return std::find_if(objects.begin(), objects.end(), [&](const auto& o) { return o.name == name; })->data;
   };
+  if (input_icons) {
+    auto color = original("UIColor.color");
+    // Keep the controller art at full color in every row state.
+    SceneColor(color, 0x11, 1, 1, 1, 1);
+    objects.push_back({"UIColor", std::string(kIconColor), std::move(color)});
+  }
   const auto prototype_material = original("highlight.mat");
   const auto prototype_mesh = original("highlight.mesh");
   auto button = [&](std::string name, bool selected, bool border) {
