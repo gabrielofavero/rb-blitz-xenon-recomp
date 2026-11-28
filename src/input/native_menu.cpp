@@ -369,7 +369,9 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   gameplay_resolution_active = GameplayResolutionScreen(name, panel_name, focus_name);
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene) &&
       (!ui::PortraitStoreScreen(name) || ui::screen::CurrentMenuConfiguration().rhythmverse_row);
-  portrait_panel_state.Publish(current_panel_dir, portrait_splash_active, name);
+  const bool library = std::find(ui::kPortraitLibraryScreens.begin(), ui::kPortraitLibraryScreens.end(), name) !=
+      ui::kPortraitLibraryScreens.end();
+  portrait_panel_state.Publish(library ? loaded_panel_dir : current_panel_dir, portrait_splash_active, name);
   current_panel_name = panel_name;
   // The store modal focuses the panel without a UIComponent. Its action
   // labels live in the loaded PanelDir, independent of the focus directory.
@@ -1230,9 +1232,8 @@ bool RecommendationFooter(PPCContext& ctx, uint8_t* base, uint32_t dir) {
 ui::PortraitCalibrationAction PortraitFooterSlot(PPCContext& ctx, uint8_t* base, uint32_t dir,
                                                 size_t index, size_t count) {
   const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
-  if (RecommendationFooter(ctx, base, dir)) return ui::PortraitRecommendationsFooter(aspect, index, count);
-  return SceneObject(ctx, base, dir, "portrait_songs.color")
-      ? ui::PortraitSongsFooter(aspect, index, count) : ui::PortraitFooterAction(aspect, index, count);
+  return PortraitStoreActive() || SceneObject(ctx, base, dir, "portrait_songs.color")
+      ? ui::PortraitLibraryFooter(aspect, index, count) : ui::PortraitFooterAction(aspect, index, count);
 }
 
 ui::PortraitCalibrationAction PortraitMenuHintSlot(PPCContext& ctx, uint8_t* base, uint32_t owner,
@@ -1812,11 +1813,13 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
     available_width = layout.width - 20;
     available_height = subject ? layout.subject_height : layout.body_height;
   } else if (DrawScreenName() == "recommendation_screen") {
-    const auto header = ObjectBase(base, label);
-    if (!header || (name != "rec_type.lbl" && !RecommendationFooter(ctx, base, U32(base, header + 36)))) return false;
+    // UIList draws a cloned label. Its provider field keeps the authored name.
+    const bool category = name == "rec_type.lbl" || (drawing && drawing->row &&
+        ObjectName(base, ObjectBase(base, drawing->widget)) == "rec_type");
+    if (!category && !RecommendationFooter(ctx, base, dir)) return false;
     const auto layout = ui::PortraitRecommendations(aspect);
     x = layout.Left(); available_width = layout.TextWidth();
-    if (name == "rec_type.lbl") { z = layout.TypeTop(); available_height = layout.type_height; }
+    if (category) { z = layout.TypeTop(); available_height = layout.type_height; }
     else if (name == "song_title.lbl") { z = layout.TitleTop(); available_height = layout.title_height; }
     else if (name == "song_artist.lbl") { z = layout.ArtistTop(); available_height = layout.artist_height; }
     else if (name == "song_info.lbl") { z = layout.InfoTop(); available_height = layout.info_height; }
@@ -1837,9 +1840,11 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
       [base](uint32_t at) { return U32(base, at); },
       [base](uint32_t at) { return F32(base, at); });
   const float left = ink ? (*ink)[0] : F32(base, label + 144);
-  const float top = ink ? (*ink)[3] : F32(base, label + 148);
+  const float rect_height = F32(base, label + 156);
+  // The fallback rectangle starts at either edge depending on the height sign.
+  const float top = ink ? (*ink)[3] : F32(base, label + 148) + std::max(0.f, rect_height);
   const float width = ink ? (*ink)[2] - left : F32(base, label + 152);
-  const float height = ink ? top - (*ink)[1] : std::abs(F32(base, label + 156));
+  const float height = ink ? top - (*ink)[1] : std::abs(rect_height);
   if (!(width > 0 && height > 0)) { __imp__sub_824BC668(ctx, base); return true; }
   const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
   const auto world = WorldTransformForDraw(transformable,

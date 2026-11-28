@@ -132,7 +132,8 @@ struct LibraryHeaderOptions {
 };
 // Header-only transition wrapper: destination, then +1 for RT or -1 for LT.
 inline constexpr const char* kLibraryHeaderTransition = "rbbz_header_transition_to";
-bool ConfigureLibraryHeaderAnimations(std::vector<ui::dtb::Node>* roots, std::string* why);
+bool ConfigureLibraryHeaderAnimations(std::vector<ui::dtb::Node>* roots, std::string* why,
+                                      bool portrait = false);
 bool ConfigureLibraryHeaderBar(std::vector<ui::dtb::Node>* roots,
                                 LibraryHeaderOptions options, std::string* why);
 // Opt-in runtime header path. Rebuilds the shared label/position group on panel

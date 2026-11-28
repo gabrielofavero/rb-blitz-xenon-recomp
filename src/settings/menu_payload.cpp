@@ -442,7 +442,7 @@ bool SetHeaderAnimationBeforeGoto(Node& function, Node direction) {
 // tab breaks that inference, and two-tab rings need opposite swipes for the same
 // endpoints. Trigger and mouse routes override it; keep the retail expression intact
 // for every other caller. See RhythmVerse plan P9-4's animation/layout correction.
-bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why) {
+bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why, bool portrait) {
   if (!roots) { if (why) *why = "no transition definitions"; return false; }
   auto staged = *roots;
   Node* between = nullptr;
@@ -471,6 +471,29 @@ bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why
       Node::Command({Node::Symbol("if_else"),
           Node::Command({Node::Symbol(">"), property(), Node::Int(0)}),
           Node::Symbol("shift_right"), Node::Symbol("shift_left")}), animation->kids[1]});
+  if (portrait) {
+    auto* enter = FindNode(*transition, ui::dtb::kArray, "enter");
+    if (!enter) {
+      if (why) *why = "portrait header transition lacks its entry handler";
+      return false;
+    }
+    // The horizontal Flow pans the landscape foreground across the camera.
+    // Keep it out of portrait tab swipes while the existing Flow moves the
+    // marquee and page content. Restore the guest's visibility on exit.
+    const auto s = [](std::string_view value) { return Node::Symbol(value); };
+    const auto c = [](std::vector<Node> nodes) { return Node::Command(std::move(nodes)); };
+    const auto foreground = c({s("background_panel"), s("find"), s("foreground.grp")});
+    const auto saved = s("rbbz_header_foreground_visible");
+    const auto self = Node::Var("this");
+    const auto showing = [&](const char* value) { return c({foreground, s("set_showing"), s(value)}); };
+    enter->kids.push_back(c({s("if"), c({s("!="), property(), Node::Int(0)}),
+        c({self, s("set"), saved, c({foreground, s("showing")})}),
+        showing("FALSE")}));
+    transition->kids.push_back(Node::Array({saved, s("FALSE")}));
+    transition->kids.push_back(Node::Array({s("exit"),
+        c({s("if"), Node::Property({saved}), showing("TRUE"),
+            c({self, s("set"), saved, s("FALSE")})})}));
+  }
   transition->kids.push_back(Node::Array({Node::Symbol("rbbz_header_animation"), Node::Int(0)}));
   staged.push_back(std::move(directional));
   staged.push_back(Node::Command({Node::Symbol("func"), Node::Symbol(kLibraryHeaderTransition),
@@ -3022,7 +3045,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return !portrait_interface || FitPortraitLibraryHeader(&roots, menu_config.portrait_aspect, error);
       })) return false;
   if (!edit("ui/gen/transition_screens.dtb", [&](auto& roots) {
-        return ConfigureLibraryHeaderAnimations(&roots, error);
+        return ConfigureLibraryHeaderAnimations(&roots, error, portrait_interface);
       })) return false;
   for (const auto& [path, tab] : std::array<std::pair<const char*, LibraryHeader>, 4>{{
       {"ui/song_select/gen/song_select.dtb", LibraryHeader::kSongs},

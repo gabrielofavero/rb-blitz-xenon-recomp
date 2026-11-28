@@ -132,7 +132,7 @@ int main() {
     CHECK_TRUE(layout.list_z - (layout.rows - 1) * kPortraitSongRowStep * layout.list_scale -
                kPortraitSongRowHeight / 2 * layout.list_scale > layout.card_z + layout.card_height / 2);
     for (size_t i = 0; i < 3; ++i) {
-      const auto slot = PortraitSongsFooter(aspect, i, 3);
+      const auto slot = PortraitLibraryFooter(aspect, i, 3);
       CHECK_TRUE(std::abs(slot.x) + slot.width / 2 <= layout.width / 2 + .001f);
       CHECK_TRUE(slot.z + slot.height / 2 < layout.card_z - layout.card_height / 2);
     }

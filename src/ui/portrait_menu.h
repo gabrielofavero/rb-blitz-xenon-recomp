@@ -110,7 +110,7 @@ inline constexpr float kPortraitSongArrowInset = 22;
 struct PortraitSongsLayout {
   float width, list_scale;
   float tabs_z = kPortraitHubTitleCenter, tools_z = 133, list_z = 92;
-  float card_z = -158, card_height = 52, footer_z = -201;
+  float card_z = -158, card_height = 52;
   int rows = 7;
 };
 
@@ -188,9 +188,10 @@ struct PortraitRecommendationsLayout {
   static constexpr float info_height = 14, reason_height = 43;
   static constexpr float position_top = 154, position_height = 12;
   float leaderboard_title_top = -125, leaderboard_z = -148, leaderboard_step = 17;
-  float DetailsTop() const { return carousel_z - art_size / 2 - 8; }
-  float TypeTop() const { return DetailsTop() - inset; }
-  float TitleTop() const { return TypeTop() - type_height - 4; }
+  float TypeTop() const { return carousel_z - art_size / 2 - 7; }
+  float HeroBottom() const { return TypeTop() - type_height - 6; }
+  float DetailsTop() const { return HeroBottom() - 4; }
+  float TitleTop() const { return DetailsTop() - inset; }
   float ArtistTop() const { return TitleTop() - title_height - 3; }
   float InfoTop() const { return ArtistTop() - artist_height - 2; }
   float ReasonTop() const { return InfoTop() - info_height - 5; }
@@ -287,17 +288,11 @@ inline PortraitCalibrationAction PortraitHubArrowTarget(const PortraitSongsLayou
           layout.tabs_z, 68, 56};
 }
 
-inline PortraitCalibrationAction PortraitSongsFooter(float aspect, size_t index, size_t count) {
+inline PortraitCalibrationAction PortraitLibraryFooter(float aspect, size_t index, size_t count) {
   const auto layout = PortraitSongs(aspect);
-  const float width = (layout.width - 5 * (count - 1)) / count;
-  return {(float(index) - float(count - 1) / 2) * (width + 5),
-          layout.footer_z, width, 27};
-}
-
-inline PortraitCalibrationAction PortraitRecommendationsFooter(float aspect, size_t index, size_t count) {
-  const float width = PortraitRecommendations(aspect).width;
-  const float cell = (width - 5 * (count - 1)) / count;
-  return {(float(index) - float(count - 1) / 2) * (cell + 5), -211, cell, 29};
+  constexpr float gap = 5;
+  const float width = (layout.width - gap * (count - 1)) / count;
+  return {(float(index) - float(count - 1) / 2) * (width + gap), -204, width, 30};
 }
 
 inline const char* PortraitRecommendationFooterSurface(size_t index) {

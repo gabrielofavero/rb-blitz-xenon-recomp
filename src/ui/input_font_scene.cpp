@@ -865,7 +865,7 @@ void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
     }
   }
   for (size_t i = 0; i < (recommendations ? 2u : 3u); ++i) {
-    const auto slot = recommendations ? ui::PortraitRecommendationsFooter(aspect, i, 2) :
+    const auto slot = recommendations ? ui::PortraitLibraryFooter(aspect, i, 2) :
                                          ui::PortraitCalibrationFooter(aspect, i);
     PortraitSurface(scene, buttons,
         recommendations ? ui::PortraitRecommendationFooterSurface(i) :
@@ -2397,9 +2397,8 @@ bool PreparePortraitRecommendations(const std::vector<uint8_t>& source,
   PortraitText(position, 10, layout.PositionWidth(), 0x14);
   edited.objects.push_back(std::move(position));
   edited.Before("info.grp", {"portrait_rec_position.lbl"});
-  const float hero_bottom = layout.DetailsTop() - 2;
-  PortraitSurface(edited, buttons, "portrait_rec_hero", layout.width, layout.hero_top - hero_bottom,
-                  0, (layout.hero_top + hero_bottom) / 2, "portrait_rec_position.lbl");
+  PortraitSurface(edited, buttons, "portrait_rec_hero", layout.width, layout.hero_top - layout.HeroBottom(),
+                  0, (layout.hero_top + layout.HeroBottom()) / 2, "portrait_rec_position.lbl");
   PortraitSurface(edited, buttons, "portrait_rec_details", layout.width, layout.DetailsTop() - layout.DetailsBottom(),
                   0, (layout.DetailsTop() + layout.DetailsBottom()) / 2, "portrait_rec_position.lbl");
   // Reading areas separate small text from the detailed animated backdrop.

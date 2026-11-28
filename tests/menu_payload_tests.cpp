@@ -532,6 +532,7 @@ std::vector<Node> AnimationFixture() {
           S("shift_left"), S("shift_right")})});
   return {C({S("func"), S("create_one_way_transition_screen"), A({}),
       C({S("new"), S("TransitionScreen"), S("test_transition"),
+          A({S("enter"), C({S("native_enter")})}),
           A({S("TRANSITION_COMPLETE_MSG"), C({S("do"), A({Node::Var("anim_type"), fallback})})})})}),
       C({S("func"), S("transition_between"), A({Node::Var("screen_a"), Node::Var("screen_b")}),
           C({S("do"), C({S("create_one_way_transition_screen")}),
@@ -625,6 +626,16 @@ void TestHeaderAnimations() {
   CHECK_TRUE(binding && old);
   if (binding && old) CHECK_TRUE(dtb::Compile({binding->kids[1].kids[3]}) == dtb::Compile({old->kids[1]}));
   for (int mask = 0; mask < 8; ++mask) CheckAnimations(roots, mask);
+  CHECK_FALSE(Has(*Function(roots, "create_one_way_transition_screen"), "foreground.grp"));
+  auto portrait = original;
+  CHECK_TRUE(settings::ConfigureLibraryHeaderAnimations(&portrait, &why, true));
+  const auto* factory = Function(portrait, "create_one_way_transition_screen");
+  const auto* enter = Find(*factory, dtb::kArray, "enter");
+  const auto* exit = Find(*factory, dtb::kArray, "exit");
+  CHECK_TRUE(enter && Has(*enter, "native_enter") && Has(*enter, "foreground.grp") &&
+             Has(*enter, "rbbz_header_animation"));
+  CHECK_TRUE(exit && Has(*exit, "foreground.grp") && Has(*exit, "rbbz_header_foreground_visible"));
+  for (int mask = 0; mask < 8; ++mask) CheckAnimations(portrait, mask);
   auto invalid = AnimationFixture();
   invalid.pop_back();
   const auto before = dtb::Compile(invalid);
@@ -2133,7 +2144,9 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.subject_top < layout.detail_top);
     CHECK_TRUE(layout.subject_top - layout.subject_height > layout.body_top);
     CHECK_TRUE(layout.body_top - layout.body_height > layout.detail_bottom);
-    CHECK_TRUE(layout.detail_bottom > rb_blitz::ui::PortraitSongsFooter(aspect, 0, 2).z + 15);
+    const auto back = rb_blitz::ui::PortraitLibraryFooter(aspect, 0, 1);
+    CHECK_TRUE(back.width == layout.width);
+    CHECK_TRUE(layout.detail_bottom > back.z + back.height / 2);
   }
   BeginCase("portrait Messages keeps Back in the footer and measures text after provider callbacks");
   {
@@ -2190,8 +2203,10 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.PositionWidth() > 0);
     CHECK_TRUE(-layout.Left() - layout.PositionWidth() > layout.art_size / 2);
     CHECK_TRUE(layout.DetailsTop() < layout.carousel_z - layout.art_size / 2);
-    CHECK_TRUE(layout.TypeTop() < layout.DetailsTop());
-    CHECK_TRUE(layout.TypeTop() - layout.type_height > layout.TitleTop());
+    CHECK_TRUE(layout.TypeTop() < layout.carousel_z - layout.art_size / 2);
+    CHECK_TRUE(layout.TypeTop() - layout.type_height > layout.HeroBottom());
+    CHECK_TRUE(layout.HeroBottom() > layout.DetailsTop());
+    CHECK_TRUE(layout.DetailsTop() > layout.TitleTop());
     CHECK_TRUE(layout.TitleTop() - layout.title_height > layout.ArtistTop());
     CHECK_TRUE(layout.ArtistTop() - layout.artist_height > layout.InfoTop());
     CHECK_TRUE(layout.InfoTop() - layout.info_height > layout.ReasonTop());
@@ -2199,13 +2214,15 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.DetailsBottom() > layout.leaderboard_title_top);
     for (size_t count = 1; count <= 2; ++count) {
       for (size_t i = 0; i < count; ++i) {
-        const auto a = rb_blitz::ui::PortraitRecommendationsFooter(aspect, i, count);
+        const auto a = rb_blitz::ui::PortraitLibraryFooter(aspect, i, count);
+        const auto songs_footer = rb_blitz::ui::PortraitLibraryFooter(aspect, 0, 3);
+        CHECK_TRUE(a.z == songs_footer.z && a.height == songs_footer.height);
         CHECK_TRUE(a.width > 32 && a.height >= 25);
         CHECK_TRUE(std::abs(a.x) + a.width / 2 <= layout.width / 2 + .001f);
         CHECK_TRUE(a.z - a.height / 2 > -240);
         CHECK_TRUE(a.z + a.height / 2 < layout.leaderboard_z - layout.leaderboard_step - 7);
         for (size_t j = 0; j < i; ++j) {
-          const auto b = rb_blitz::ui::PortraitRecommendationsFooter(aspect, j, count);
+          const auto b = rb_blitz::ui::PortraitLibraryFooter(aspect, j, count);
           CHECK_TRUE(std::abs(a.x - b.x) >= (a.width + b.width) / 2 ||
                      std::abs(a.z - b.z) >= (a.height + b.height) / 2);
           CHECK_TRUE(std::string_view(rb_blitz::ui::PortraitRecommendationFooterSurface(i)) !=
@@ -3384,6 +3401,7 @@ int main(int argc, char** argv) {
           path != "ui/calibration/gen/calibration.dtb" &&
           path != "ui/song_select/gen/song_select.dtb" &&
           path != "ui/background/gen/background.dtb" &&
+          path != "ui/gen/transition_screens.dtb" &&
           path != "ui/inbox/gen/inbox.dtb" &&
           path != "ui/recommendations/gen/recommendations.dtb" &&
           path != "ui/powerup_select/gen/powerup_select.dtb" &&
@@ -3808,7 +3826,7 @@ int main(int argc, char** argv) {
       CHECK_TRUE(details.contains("portrait_store_cover.mesh"));
       CHECK_TRUE(offer.art_size > 80);
       CHECK_TRUE(offer.ArtZ() - offer.art_size / 2 > offer.CreditsTop());
-      CHECK_TRUE(offer.Bottom() > rb_blitz::ui::PortraitRecommendationsFooter(aspect, 0, 2).z + 20);
+      CHECK_TRUE(offer.Bottom() > rb_blitz::ui::PortraitLibraryFooter(aspect, 0, 2).z + 20);
       for (size_t i = 0; i < 4; ++i) {
         const auto parent_length = u32(album.data() + 0x15 + 105);
         const auto x = std::bit_cast<float>(u32(album.data() + 208 + parent_length + i * 36));
