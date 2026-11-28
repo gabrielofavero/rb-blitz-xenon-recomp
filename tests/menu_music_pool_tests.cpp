@@ -495,6 +495,7 @@ void TestSongMetadata() {
       "Sarah McLachlan"
    )
    ('master' 1)
+   ('album_name' "Surfacing")
    (
       'song'
       (
@@ -513,14 +514,16 @@ void TestSongMetadata() {
     CHECK_TRUE(con_songs[0].stream == "songs/o454039871_buildingamyster/o454039871_buildingamyster");
     CHECK_TRUE(con_songs[0].title == "Building a Mystery");
     CHECK_TRUE(con_songs[0].artist == "Sarah McLachlan");
+    CHECK_TRUE(con_songs[0].album == "Surfacing");
   }
-  // A song node's own title/artist win over the record's.
   const auto prefer = parse("(k (name \"Record title\") (artist \"Record artist\") "
-                            "(song (name \"songs/k/k\") (title \"Song title\") (artist \"Song artist\")))");
+                            "(album_name \"Record album\") (song (name \"songs/k/k\") "
+                            "(title \"Song title\") (artist \"Song artist\") (album_name \"Song album\")))");
   CHECK_EQ(prefer.size(), 1u);
   if (!prefer.empty()) {
     CHECK_TRUE(prefer[0].title == "Song title");
     CHECK_TRUE(prefer[0].artist == "Song artist");
+    CHECK_TRUE(prefer[0].album == "Song album");
   }
 
   BeginCase("compiled metadata produces the same keys and rejects damaged bytes");

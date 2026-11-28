@@ -64,8 +64,9 @@ Portrait store layouts refresh each list after changing its visible row count:
 the native setter recreates label elements without filling them from the provider.
 The private header uses the portrait font and stays outside the menu's loading,
 loaded and unavailable groups so state changes preserve its centered title.
-Row surfaces identify the owning `UIListLabel` provider field: the guest creates
-unnamed `UILabel` copies for each visible element. The library tab titles center
+Store list resources draw the title fields before the count and ownership fields.
+The first populated title supplies the transform for the row surface and its
+touch bounds, including while scrolling. The library tab titles center
 between the shared marquee's settled rails, outside the content panel's safe-area
 transform, matching the background panel that draws those rails and arrows.
 

@@ -28,6 +28,7 @@ bool PreviewEnabled() { return rb_blitz::settings::title::touch_preview.Get(); }
 #include "input/touch_timing.h"
 #include "input/remap.h"
 #include "ui/achievements_overlay.h"
+#include "ui/menu_music_player.h"
 
 namespace rb_blitz::input::touch {
 namespace {
@@ -167,7 +168,11 @@ class Controls final : public rex::ui::DialogBase {
       std::lock_guard menu_lock(self.menu_mutex_);
       const auto key = std::pair<uint64_t, uint64_t>{finger.touchID, finger.fingerID};
       if (phase == Phase::kDown) {
-        if (self.menu_fingers_.empty()) self.menu_primary_ = key;
+        if (self.menu_fingers_.empty()) {
+          self.menu_primary_ = key;
+          self.menu_touch_on_player_ = !active && g_foreground && HostInputFocused() &&
+              ui::music::PlayerOwnsTouchStart(finger.x, finger.y);
+        }
         self.menu_fingers_.insert(key);
       }
       bool menu_captured = false;
@@ -180,7 +185,10 @@ class Controls final : public rex::ui::DialogBase {
           g_calibration.SetTarget(0);
         menu_captured = g_calibration.Observe(phase, finger.timestamp ? finger.timestamp : now);
       }
-      if (!menu_captured && self.menu_primary_ == key && !active && g_foreground && HostInputFocused()) {
+      // The player handles the synthesized mouse sequence. Keep the raw
+      // contact from also selecting a guest row underneath the drawer.
+      if (!menu_captured && self.menu_primary_ == key && !self.menu_touch_on_player_ &&
+          !active && g_foreground && HostInputFocused()) {
         const auto menu_phase = phase == Phase::kDown ? MenuTouchPhase::kDown :
             phase == Phase::kMove ? MenuTouchPhase::kMove :
             phase == Phase::kUp ? MenuTouchPhase::kUp : MenuTouchPhase::kCancel;
@@ -254,6 +262,7 @@ class Controls final : public rex::ui::DialogBase {
   std::mutex menu_mutex_;
   std::set<std::pair<uint64_t, uint64_t>> menu_fingers_;
   std::optional<std::pair<uint64_t, uint64_t>> menu_primary_;
+  bool menu_touch_on_player_ = false;
 };
 }
 Actions SampleGameplay(bool active) {

@@ -920,10 +920,7 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
            uint32_t(scene[at + 2]) << 8 | scene[at + 3];
   };
   const float cell = font::kPrivateFontCellWidth;
-  const uint32_t index = hint ? font::kHintFirst + font::kSplashStartHint : 0;
   const float glyph_width = float(font::kPrivateIconSize) / cell;
-  const float glyph_x = float(font::PrivateIconX(index)) / font::kAtlasSize;
-  const float glyph_y = float(font::PrivateIconY(index) - font::kPrivateInset) / font::kAtlasSize;
   size_t tables = 0;
   for (size_t at = 0x810 + 580; at + (256 - 32) * 18 <= scene.size(); ++at) {
     if (scene[at] != 0 || scene[at + 1] != 0x20 || be32(at - 580) != 256) continue;
@@ -935,11 +932,19 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
     const size_t table = at - 576;
     CHECK_EQ(be32(table - 12), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
     CHECK_EQ(be32(table - 8), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
-    const size_t glyph = table + (hint ? font::kSplashGlyphCode : font::GlyphCode(0)) * 18;
-    CHECK_EQ(be32(glyph + 2), std::bit_cast<uint32_t>(glyph_x));
-    CHECK_EQ(be32(glyph + 6), std::bit_cast<uint32_t>(glyph_y));
-    CHECK_EQ(be32(glyph + 10), std::bit_cast<uint32_t>(glyph_width));
-    CHECK_EQ(be32(glyph + 14), std::bit_cast<uint32_t>(glyph_width));
+    const auto check_glyph = [&](uint32_t code, uint32_t index) {
+      const size_t glyph = table + code * 18;
+      const float x = float(font::PrivateIconX(index)) / font::kAtlasSize;
+      const float y = float(font::PrivateIconY(index) - font::kPrivateInset) / font::kAtlasSize;
+      CHECK_EQ(be32(glyph + 2), std::bit_cast<uint32_t>(x));
+      CHECK_EQ(be32(glyph + 6), std::bit_cast<uint32_t>(y));
+      CHECK_EQ(be32(glyph + 10), std::bit_cast<uint32_t>(glyph_width));
+      CHECK_EQ(be32(glyph + 14), std::bit_cast<uint32_t>(glyph_width));
+    };
+    if (hint) {
+      check_glyph(font::kSplashGlyphCode, font::kHintFirst + font::kSplashStartHint);
+      check_glyph(font::kCalibrationTapGlyphCode, font::kCalibrationTapIcon);
+    } else check_glyph(font::GlyphCode(0), 0);
   }
   CHECK_EQ(tables, size_t{4});
 }
@@ -2182,12 +2187,16 @@ void TestPortraitSplash() {
     const auto layout = rb_blitz::ui::PortraitRecommendations(aspect);
     CHECK_TRUE(layout.carousel_z + layout.art_size / 2 < layout.tabs_z - 20);
     CHECK_TRUE(layout.NavigationX() - layout.navigation_size / 2 > layout.art_size / 2);
-    CHECK_TRUE(layout.TypeZ() + 6 < layout.carousel_z - layout.art_size / 2);
-    CHECK_TRUE(layout.TypeZ() - 8 > layout.title_top);
-    CHECK_TRUE(layout.title_top - layout.title_height > layout.artist_top);
-    CHECK_TRUE(layout.artist_top - layout.artist_height > layout.info_top);
-    CHECK_TRUE(layout.info_top - layout.info_height > layout.reason_top);
-    CHECK_TRUE(layout.reason_top - layout.reason_height > layout.leaderboard_title_top);
+    CHECK_TRUE(layout.PositionWidth() > 0);
+    CHECK_TRUE(-layout.Left() - layout.PositionWidth() > layout.art_size / 2);
+    CHECK_TRUE(layout.DetailsTop() < layout.carousel_z - layout.art_size / 2);
+    CHECK_TRUE(layout.TypeTop() < layout.DetailsTop());
+    CHECK_TRUE(layout.TypeTop() - layout.type_height > layout.TitleTop());
+    CHECK_TRUE(layout.TitleTop() - layout.title_height > layout.ArtistTop());
+    CHECK_TRUE(layout.ArtistTop() - layout.artist_height > layout.InfoTop());
+    CHECK_TRUE(layout.InfoTop() - layout.info_height > layout.ReasonTop());
+    CHECK_TRUE(layout.ReasonTop() - layout.reason_height > layout.DetailsBottom());
+    CHECK_TRUE(layout.DetailsBottom() > layout.leaderboard_title_top);
     for (size_t count = 1; count <= 2; ++count) {
       for (size_t i = 0; i < count; ++i) {
         const auto a = rb_blitz::ui::PortraitRecommendationsFooter(aspect, i, count);
@@ -3620,6 +3629,26 @@ int main(int argc, char** argv) {
       }
       CHECK_TRUE(panel.contains("spinner_hoz") && panel.contains("spinner_hoz1") && panel.contains("spinner_vert"));
       CHECK_TRUE(std::bit_cast<float>(u32(panel.at("portrait_rec_details.mat").data() + 0x25)) >= .9f);
+      const auto& details = panel.at("portrait_rec_details.mesh");
+      const float details_top = std::bit_cast<float>(u32(details.data() + 0x15 + 44));
+      const float details_height = 30 * std::bit_cast<float>(u32(details.data() + 0x15 + 20));
+      CHECK_TRUE(std::abs(details_top - layout.DetailsTop()) < .001f);
+      CHECK_TRUE(std::abs(details_top - details_height - layout.DetailsBottom()) < .001f);
+      const auto& members = panel.at("home.grp");
+      const auto draw_member = [&](std::string_view name) {
+        return std::search(members.begin(), members.end(), name.begin(), name.end());
+      };
+      CHECK_TRUE(draw_member("portrait_rec_details.mesh") < draw_member("portrait_rec_position.lbl"));
+      CHECK_TRUE(draw_member("portrait_rec_position.lbl") < draw_member("description.lbl"));
+      const auto check_label_pose = [&](const auto& label, float x, float z) {
+        CHECK_EQ(std::bit_cast<float>(u32(label.data() + 0x19 + 36)), x);
+        CHECK_EQ(std::bit_cast<float>(u32(label.data() + 0x19 + 44)), z);
+      };
+      for (const auto& [name, top] : {std::pair{"song_title.lbl", layout.TitleTop()},
+           {"song_artist.lbl", layout.ArtistTop()}, {"song_info.lbl", layout.InfoTop()},
+           {"description.lbl", layout.ReasonTop()}})
+        check_label_pose(panel.at(name), layout.Left(), top);
+      check_label_pose(panel.at("portrait_rec_position.lbl"), -layout.Left(), layout.position_top);
       for (const char* name : {"song_title.lbl", "song_artist.lbl", "song_info.lbl", "description.lbl", "recommendations.lst"})
         CHECK_EQ(u32(panel.at(name).data() + 0x19 + 105), 12u);
       CHECK_EQ(u32(panel.at("recommendations.lst").data() + 0x19 + 44), std::bit_cast<uint32_t>(layout.carousel_z));
@@ -3637,6 +3666,7 @@ int main(int argc, char** argv) {
       CHECK_EQ(u32(cards.at("album_slot.mesh").data() + 0x15), std::bit_cast<uint32_t>(layout.art_size / 125));
       CHECK_EQ(u32(cards.at("album_slot.mesh").data() + 0x15 + 36), std::bit_cast<uint32_t>(0.f));
       CHECK_TRUE(contains(cards.at("rec_type.lbl"), "portrait_splash.milo"));
+      check_label_pose(cards.at("rec_type.lbl"), layout.Left(), layout.TypeTop() - layout.carousel_z);
       CHECK_TRUE(read("ui/resource/lists/gen/list_home_lb.milo_xbox", &source, &why));
       const auto original_leaders = source;
       CHECK_TRUE(font::PreparePortraitRecommendationLeaderboard(source, aspect, &scene, &why));
@@ -3703,13 +3733,18 @@ int main(int argc, char** argv) {
       CHECK_TRUE(dialog.contains("error.lbl") && dialog.contains("continue.lbl"));
       CHECK_TRUE(dialog.contains("portrait_dialog_close.lbl"));
       CHECK_TRUE(dialog.contains("portrait_dialog_panel.mesh"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_shade.mesh"));
+      for (const char* name : {"portrait_dialog_rail_0.mesh", "portrait_dialog_rail_1.mesh",
+                              "portrait_dialog_rail_2.mesh"})
+        CHECK_TRUE(dialog.contains(name));
       CHECK_TRUE(dialog.contains("portrait_dialog_action.mesh"));
       CHECK_TRUE(dialog.contains("portrait_dialog_close.mesh"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_single.mesh"));
       const auto modal = rb_blitz::ui::PortraitStoreDialog(aspect);
-      CHECK_TRUE(modal.text_top < modal.close_z - modal.close_size / 2);
+      CHECK_TRUE(modal.text_top < modal.height / 2);
       CHECK_TRUE(modal.text_top - modal.text_height > modal.action_z + modal.action_height / 2);
       CHECK_TRUE(modal.action_z - modal.action_height / 2 > -modal.height / 2);
-      CHECK_TRUE(modal.CloseX() + modal.close_size / 2 < modal.width / 2);
+      CHECK_TRUE(modal.ActionX() + modal.ActionWidth() / 2 <= modal.TextWidth() / 2);
 
       // Text inherits the owning canvas fit, independently of the hidden old art.
       for (const char* name : {"error.lbl", "continue.lbl"})
@@ -3719,6 +3754,8 @@ int main(int argc, char** argv) {
         const auto objects = stored_objects(records.at(std::string("ui/resource/lists/gen/portrait_store_") + kind + ".milo_xbox"));
         CHECK_TRUE(objects.contains(field));
         CHECK_TRUE(objects.contains("portrait_row.mesh") && objects.contains("portrait_selected.mesh"));
+        CHECK_TRUE(objects.contains("portrait_caption_black.color"));
+        if (std::string_view(kind) == "menu") CHECK_TRUE(objects.contains("portrait_row_border.mesh"));
         if (std::string_view(kind) == "browser") {
           // The measured native Flow includes its own directory and FlowAnimate.
           // Losing those boundaries makes the guest read texture pixels as names.
@@ -3730,13 +3767,17 @@ int main(int argc, char** argv) {
       }
       const auto details = stored_objects(records.at("ui/store/gen/store_details.milo_xbox"));
       const auto& album = details.at("album.mesh");
-      const auto layout = rb_blitz::ui::PortraitSongs(aspect);
+      const auto offer = rb_blitz::ui::PortraitStoreOffer(aspect);
+      CHECK_TRUE(details.contains("portrait_store_cover.mesh"));
+      CHECK_TRUE(offer.art_size > 80);
+      CHECK_TRUE(offer.ArtZ() - offer.art_size / 2 > offer.CreditsTop());
+      CHECK_TRUE(offer.Bottom() > rb_blitz::ui::PortraitRecommendationsFooter(aspect, 0, 2).z + 20);
       for (size_t i = 0; i < 4; ++i) {
         const auto parent_length = u32(album.data() + 0x15 + 105);
         const auto x = std::bit_cast<float>(u32(album.data() + 208 + parent_length + i * 36));
         const auto z = std::bit_cast<float>(u32(album.data() + 216 + parent_length + i * 36));
-        CHECK_TRUE(std::abs(x - (-layout.width / 2 + 27)) <= 20.001f);
-        CHECK_TRUE(std::abs(z - layout.card_z) <= 20.001f);
+        CHECK_TRUE(std::abs(x) <= 20.001f);
+        CHECK_TRUE(std::abs(z) <= 20.001f);
       }
       for (const bool info : {false, true}) {
         const auto& record = records.at(info ? "ui/store/gen/store_info.dtb" : "ui/store/gen/store.dtb");
@@ -3797,6 +3838,16 @@ int main(int argc, char** argv) {
           const auto* refresh = header_test::Method(roots, "store_browser_panel", "refresh_list");
           CHECK_TRUE(refresh != nullptr);
           CHECK_TRUE(header_test::Method(roots, "store_details_panel", "refresh") != nullptr);
+          CHECK_TRUE(header_test::Method(roots, "store_details_panel", "rbbz_portrait_offer_layout") != nullptr);
+          bool portrait_search = false;
+          for (const auto& root : roots) {
+            if (root.kids.size() < 3 || root.kids[2].text != "rbbz_search_loading_panel") continue;
+            portrait_search = std::any_of(root.kids.begin(), root.kids.end(), [](const auto& member) {
+              return member.kids.size() == 2 && member.kids[0].text == "file" &&
+                     member.kids[1].text == "../error/portrait_store_dialog.milo";
+            });
+          }
+          CHECK_TRUE(portrait_search);
         }
       }
       std::vector<uint8_t> source, refused{1,2,3};
@@ -4174,7 +4225,7 @@ int main(int argc, char** argv) {
     const auto credits = stored_objects(portrait.at("ui/credits/gen/credits.milo_xbox"));
     CHECK_EQ(u32(credits.at("nav.ihp").data() + 9), uint32_t(2));
     CHECK_FALSE(credits.contains("portrait_back.ihp"));
-    BeginCase("calibration list keeps the provider widget and wizard keeps its changing native footer");
+    BeginCase("portrait calibration stacks its native heading, instructions, tap cue and meter");
     const auto calibration_list = stored_objects(portrait.at(rb_blitz::ui::input_font::kPortraitCalibrationListRecord));
     CHECK_TRUE(calibration_list.contains("name"));
     CHECK_FALSE(calibration_list.contains("song"));
@@ -4184,9 +4235,27 @@ int main(int argc, char** argv) {
     const auto z = [&](const char* name) {
       return std::bit_cast<float>(u32(wizard.at(name).data() + 0x19 + 44));
     };
+    CHECK_FALSE(object_showing(wizard.at("header.lbl"), 0x19));
+    for (const auto& [name, token, group] : {
+        std::tuple{"audio_title.lbl", "cal_audio_title", "cal_audio.grp"},
+        {"video_title.lbl", "cal_video_title", "cal_video_labels.grp"}}) {
+      CHECK_EQ(z(name), rb_blitz::ui::kPortraitTitleCenter);
+      const auto& title = wizard.at(name);
+      CHECK_TRUE(std::search(title.begin(), title.end(), token, token + std::strlen(token)) != title.end());
+      const auto& members = wizard.at(group);
+      CHECK_TRUE(std::search(members.begin(), members.end(), name, name + std::strlen(name)) != members.end());
+    }
+    for (const char* name : {"cal_audio_instructions.lbl", "cal_video_instructions.lbl"}) {
+      const auto& description = wizard.at(name);
+      CHECK_EQ(z(name), rb_blitz::ui::kPortraitCalibrationInstructionsZ);
+      CHECK_EQ(std::bit_cast<float>(u32(description.data() + 0x19 + 36)), 0.f);
+      constexpr std::string_view font_path = "../resource/fonts/pentatonic.milo";
+      const auto font = std::search(description.begin(), description.end(), font_path.begin(), font_path.end());
+      CHECK_TRUE(font != description.end());
+      if (font != description.end()) CHECK_EQ(u32(&*font - 37), uint32_t{0x22});
+    }
     CHECK_TRUE(z("cal_reps.lbl") > z("cal_instructions.lbl") + 20);
     CHECK_TRUE(z("cal_instructions.lbl") > z("cal_setting.lbl") + 20);
-    CHECK_TRUE(z("cal_video_instructions.lbl") == rb_blitz::ui::kPortraitCalibrationInstructionsZ);
     BeginCase("portrait calibration hides its meter and progress on success and restores retry defaults");
     {
       const auto& record = portrait.at("ui/calibration/gen/calibration.dtb");
@@ -4240,8 +4309,8 @@ int main(int argc, char** argv) {
         const auto field = [&](size_t offset) {
           return std::bit_cast<float>(u32(button.data() + matrix + offset));
         };
-        CHECK_TRUE(std::abs(field(36) - rb_blitz::ui::PortraitSplash(config.portrait_aspect).width * .42f) < .001f);
-        CHECK_TRUE(std::abs(field(44) - rb_blitz::ui::kPortraitCalibrationMeterZ) < .001f);
+        CHECK_EQ(field(36), 0.f);
+        CHECK_EQ(field(44), rb_blitz::ui::kPortraitCalibrationPromptZ);
         const float previous = 1.5573348f * rb_blitz::ui::PortraitSplash(config.portrait_aspect).width * .65f / 511.003f;
         CHECK_TRUE(std::abs(field(0) / previous - .5f) < .001f);
         CHECK_TRUE(std::abs(field(20) - field(0)) < .001f); // retain the quad's XY-to-XZ rotation
@@ -4266,7 +4335,7 @@ int main(int argc, char** argv) {
       return std::bit_cast<float>(u32(speaker.data() + 0x21 + field));
     };
     CHECK_TRUE(std::abs(speaker_field(36) + speaker_field(0) * 223.3656f) < .001f);
-    CHECK_TRUE(std::abs(speaker_field(44) + speaker_field(32) * 39.78075f - rb_blitz::ui::kPortraitCalibrationMeterZ) < .001f);
+    CHECK_TRUE(std::abs(speaker_field(44) + speaker_field(32) * 39.78075f - rb_blitz::ui::kPortraitCalibrationSpeakerZ) < .001f);
     const auto presets = stored_objects(portrait.at("ui/controller_config/gen/controller_config.milo_xbox"));
     CHECK_TRUE(presets.contains("portrait_previous.mesh"));
     CHECK_TRUE(presets.contains("portrait_next.mesh"));

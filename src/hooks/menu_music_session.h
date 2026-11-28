@@ -122,8 +122,9 @@ class MusicSession {
     }
   }
 
-  size_t NextPosition() const {
-    for (size_t i = cursor_ == kNoIndex ? 0 : cursor_ + 1; i < playlist_.size(); ++i)
+  size_t NextPosition() const { return FindUsablePosition(cursor_ == kNoIndex ? 0 : cursor_ + 1); }
+  size_t FindUsablePosition(size_t begin) const {
+    for (size_t i = begin; i < playlist_.size(); ++i)
       if (Usable(playlist_[i].song)) return i;
     return kNoIndex;
   }

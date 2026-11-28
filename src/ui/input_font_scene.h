@@ -217,6 +217,10 @@ inline constexpr uint32_t kHintCount = 16;
 // Image slots 101..116 belong to action hints. The hint font aliases early
 // private glyph codes to these tiles, leaving P9's row glyphs unchanged.
 inline constexpr uint32_t kHintFirst = 101;
+// The first reserved tile is free in the font. Previous uses a separate button
+// sheet, and the splash's 0x80 glyph samples the dedicated Start tile.
+inline constexpr uint32_t kCalibrationTapIcon = kHintFirst;
+inline constexpr uint32_t kCalibrationTapGlyphCode = 0x90;
 inline constexpr uint32_t kSplashStartHint = 15;
 inline constexpr uint32_t kSplashGlyphCode = 0x80;
 inline constexpr uint32_t kInterfaceStartHint = 4;

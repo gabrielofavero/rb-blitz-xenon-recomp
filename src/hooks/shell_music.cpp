@@ -543,6 +543,7 @@ void DiscoverBaseSongs() {
     if (stream.size() + 1 > kBufferBytes || FindBaseRecord(stream + ".mogg").part.empty()) continue;
     PoolEntry entry{"", stream, song.key, song.title, song.artist};
     entry.artwork_locator = rb_blitz::ui::music::ResolveArtwork(stream, artwork);
+    entry.album = song.album;
     songs.push_back(std::move(entry));
   }
   const auto count = g_session.Discover(kBasePackage, std::move(songs));
@@ -598,6 +599,7 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
                 rb_blitz::shell_music::StreamIdentity(stream)) {
           entry.title = song.title;
           entry.artist = song.artist;
+          entry.album = song.album;
           break;
         }
       }
@@ -997,11 +999,23 @@ void PublishNavigator(uint8_t* base, uint32_t music) {
       const auto id = size_t(g_pending_index);
       const auto& song = g_session.Sources()[id];
       update.track = {g_session.Package(id) == kBasePackage ? MusicSource::kBaseGame : MusicSource::kDlc,
-                      id, PoolSongKey(song), song.title, song.artist, song.artwork_locator};
+                      id, PoolSongKey(song), song.title, song.artist, song.artwork_locator, song.album};
       if (update.track.title.empty()) update.track.title = update.track.key;
     } else if (g_title_index >= 0) {
       update.track = {MusicSource::kTitle, size_t(g_title_index), kTitleTracks[g_title_index],
                      std::format("Menu Track {}", g_title_index + 1), "Unknown artist", {}};
+    }
+    if (update.track.source != MusicSource::kNone) {
+      auto position = g_session.NextPosition();
+      while (position != kNoIndex && update.up_next.size() < MusicSession::kAhead) {
+        const auto id = g_session.SongAt(position);
+        const auto& song = g_session.Sources()[id];
+        update.up_next.push_back({
+            !g_enabled ? std::format("Menu Track {}", id + 1)
+                       : song.title.empty() ? PoolSongKey(song) : song.title,
+            song.artist});
+        position = g_session.FindUsablePosition(position + 1);
+      }
     }
   }
   NowPlaying().Publish(g_nav_epoch, std::move(update), available);

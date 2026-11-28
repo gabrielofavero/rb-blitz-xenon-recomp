@@ -166,6 +166,32 @@ run-game-mobile "$2"
             self.assertEqual(result.stdout.split(b"\0")[:-1], [target.encode(), b"run", b"--mobile", argument.encode()])
 
     @unittest.skipUnless(BASH, "Bash is unavailable")
+    def test_ios_build_shortcut_loads_local_tools_and_preserves_arguments(self):
+        scripts = self.root / "scripts"
+        shutil.copytree(REPOSITORY / "scripts/dev", scripts / "dev")
+        entry = self.root / "dev.sh"
+        shutil.copy2(REPOSITORY / "dev.sh", entry)
+        builder = scripts / "ios/build.sh"
+        builder.parent.mkdir()
+        builder.write_text("printf '%s\\0' \"$DEVELOPER_DIR\" \"${PATH%%:*}\" \"$@\"\nexit 23\n")
+        (self.root / "dev.ios.local.sh").write_text(
+            'export DEVELOPER_DIR="/Xcode with spaces"\n'
+            'export PATH="$RBBLITZ_DEV_ROOT/local tools:$PATH"\n'
+        )
+        env = dict(SHELL_ENV, RBBLITZ_DEV_PLATFORM="mac", DEVELOPER_DIR="/Parent Xcode")
+        args = ["--ultimate-source", "Archive with spaces.zip"]
+        expected = [b"/Xcode with spaces", os.fsencode(str(self.root / "local tools")), *map(os.fsencode, args)]
+        for command in ([BASH, str(entry), "build-ios", *args],
+                        [BASH, str(entry), "--platform", "ios", "build", *args]):
+            result = subprocess.run(command, env=env, capture_output=True)
+            self.assertEqual(result.returncode, 23, result.stderr)
+            self.assertEqual(result.stdout.split(b"\0")[:-1], expected)
+        result = subprocess.run(
+            [BASH, "-c", 'source "$1"; shift; build-ios "$@"; printf "%s\\0" "$?" "$DEVELOPER_DIR"',
+             "dev-test", str(entry), *args], env=env, capture_output=True, check=True)
+        self.assertEqual(result.stdout.split(b"\0")[:-1], [*expected, b"23", b"/Parent Xcode"])
+
+    @unittest.skipUnless(BASH, "Bash is unavailable")
     def test_shell_dispatch_propagates_exit_and_preserves_arguments(self):
         # Mock the platform executable; never launch a game or a build.
         script = '''

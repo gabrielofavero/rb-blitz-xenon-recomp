@@ -383,9 +383,18 @@ reconfigure before building. In a dot-sourced PowerShell session, use
 perform the initial SDK/game/dependency preparation. They always select Release;
 use CMake directly for Debug or RelWithDebInfo.
 
-On iOS, `bash ./dev.sh --platform ios build [builder arguments]` reruns the
-bundled IPA pipeline. Add `--importer` for the separate importer route. These are
-Mac commands, not commands to run in a terminal on the phone.
+On a Mac, run `./dev.sh build-ios` to build the bundled IPA with assets, or use
+`build-ios` after `source ./dev.sh`. Add `--importer` for the first-launch importer
+or `--help` for the builder options. The IPA goes to `out/ios/packages/`.
+
+To reuse machine-specific tool paths, create the gitignored `dev.ios.local.sh`
+in the repository root. Adjust these example paths to match your Mac. The
+shortcut loads this file for the build, as does `./dev.sh --platform ios build`.
+
+```sh
+export PATH="$RBBLITZ_DEV_ROOT/out/tools/venv/bin:$PATH"
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+```
 
 The current SDK generates and reloads `generated/default/sources.cmake` during
 the normal build. No intentional first-build failure or mandatory second build

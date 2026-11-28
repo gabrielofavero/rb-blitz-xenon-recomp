@@ -34,6 +34,7 @@ struct PoolEntry {
   std::string title{}, artist{};
   // Exact package-relative asset path; empty until the local resolver proves it (P3).
   std::string artwork_locator{};
+  std::string album{};
 };
 
 inline constexpr size_t kNoIndex = static_cast<size_t>(-1);

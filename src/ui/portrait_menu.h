@@ -17,9 +17,15 @@ inline constexpr float kFooterOpacity = .8f;
 inline constexpr float kPortraitTitleCenter = 164.6512f;
 // Hub marquee rails settle at 204.37975 and 169.79509 in the background panel.
 inline constexpr float kPortraitHubTitleCenter = (204.37975f + 169.79509f) / 2;
-inline constexpr float kPortraitCalibrationInstructionsZ = 78;
+inline constexpr float kPortraitCalibrationInstructionsZ = 116;
 inline constexpr float kPortraitCalibrationInstructionsHeight = 58;
-inline constexpr float kPortraitCalibrationMeterZ = -16;
+inline constexpr float kPortraitCalibrationSpeakerZ = -16;
+inline constexpr float kPortraitCalibrationPromptZ = 49;
+inline constexpr float kPortraitCalibrationMeterZ = -34;
+inline constexpr float kPortraitCalibrationProgressZ = -96;
+inline constexpr float kPortraitCalibrationHitCountZ = -121;
+inline constexpr float kPortraitCalibrationStatusZ = -144;
+inline constexpr float kPortraitCalibrationOffsetZ = -167;
 inline constexpr std::array<const char*, 6> kPortraitCalibrationGraphics{
     "cal_metronome.grp", "cal_bg.grp", "visuals_anim.grp", "audio_anim.grp",
     "prog_bar.grp", "cal_reps.lbl"};
@@ -94,6 +100,8 @@ inline PortraitPauseLayout PortraitPause(float aspect) {
 }
 inline constexpr float kPortraitSongRowHeight = 55;
 inline constexpr float kPortraitSongRowStep = 60;
+inline constexpr float kPortraitStoreMenuRowZ = 110;
+inline constexpr float kPortraitStoreBrowserRowZ = 108;
 inline constexpr float kPortraitSongArrowScale = .9f;
 inline constexpr float kPortraitSongArrowInset = 22;
 inline constexpr float kPortraitSongArrowTargetSize = 40;
@@ -114,17 +122,47 @@ inline PortraitSongsLayout PortraitSongs(float aspect) {
   return layout;
 }
 
+struct PortraitStoreOfferLayout {
+  float width, art_size;
+  static constexpr float top = 154, art_top = 94, inset = 12;
+  float ArtZ() const { return art_top - art_size / 2; }
+  float CreditsTop() const { return art_top - art_size - 25; }
+  float ExtrasTop() const { return CreditsTop() - 68; }
+  float Bottom() const { return ExtrasTop() - 30; }
+  float Left() const { return -width / 2 + inset; }
+  float TextWidth() const { return width - 2 * inset; }
+};
+
+inline PortraitStoreOfferLayout PortraitStoreOffer(float aspect) {
+  const float width = PortraitSongs(aspect).width;
+  return {width, std::min(width * .74f, 142.f)};
+}
+
+struct PortraitStoreOfferLabel {
+  std::string_view name;
+  float top, size, height;
+};
+
+inline std::array<PortraitStoreOfferLabel, 6> PortraitStoreOfferLabels(
+    const PortraitStoreOfferLayout& offer) {
+  const float top = offer.CreditsTop();
+  return {{{"song.lbl", 143, 23, 32}, {"drm.lbl", 108, 15, 19},
+           {"rating.lbl", top, 13, 16}, {"rating_description.lbl", top - 18, 12, 16},
+           {"cost.lbl", top - 36, 12, 16}, {"cost_ps3.lbl", top - 54, 12, 16}}};
+}
+
 struct PortraitStoreDialogLayout {
   float width;
-  float height = 216, text_top = 46, text_height = 94;
-  float action_z = -80, action_height = 40, close_z = 76, close_size = 36;
+  float height = 136, text_top = 42, text_height = 64;
+  float action_z = -40, action_height = 32;
   float TextWidth() const { return width - 28; }
-  float ActionWidth() const { return width * .65f; }
-  float CloseX() const { return width / 2 - 24; }
+  float ActionWidth() const { return (TextWidth() - 6) / 2; }
+  float ActionX() const { return (ActionWidth() + 6) / 2; }
+  float SingleWidth() const { return TextWidth(); }
 };
 
 inline PortraitStoreDialogLayout PortraitStoreDialog(float aspect) {
-  return {PortraitSongs(aspect).width};
+  return {std::min(PortraitSongs(aspect).width, 260.f)};
 }
 
 struct PortraitMessagesLayout {
@@ -144,11 +182,21 @@ inline PortraitMessagesLayout PortraitMessages(float aspect) {
 struct PortraitRecommendationsLayout {
   float width, art_size, navigation_size;
   float tabs_z = kPortraitHubTitleCenter, carousel_z = 104;
-  float title_top = 16, title_height = 30;
-  float artist_top = -24, artist_height = 18, info_top = -46, info_height = 14;
-  float reason_top = -68, reason_height = 43;
+  static constexpr float inset = 10, hero_top = 164;
+  static constexpr float type_height = 12, title_height = 18, artist_height = 16;
+  static constexpr float info_height = 14, reason_height = 43;
+  static constexpr float position_top = 154, position_height = 12;
   float leaderboard_title_top = -125, leaderboard_z = -148, leaderboard_step = 17;
-  float TypeZ() const { return carousel_z - art_size / 2 - 14; }
+  float DetailsTop() const { return carousel_z - art_size / 2 - 8; }
+  float TypeTop() const { return DetailsTop() - inset; }
+  float TitleTop() const { return TypeTop() - type_height - 4; }
+  float ArtistTop() const { return TitleTop() - title_height - 3; }
+  float InfoTop() const { return ArtistTop() - artist_height - 2; }
+  float ReasonTop() const { return InfoTop() - info_height - 5; }
+  float DetailsBottom() const { return ReasonTop() - reason_height - inset; }
+  float Left() const { return -width / 2 + inset; }
+  float TextWidth() const { return width - 2 * inset; }
+  float PositionWidth() const { return std::min(44.f, -Left() - art_size / 2 - 4); }
   float NavigationX() const { return (width - navigation_size) / 2; }
 };
 

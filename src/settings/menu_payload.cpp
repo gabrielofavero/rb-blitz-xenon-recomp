@@ -1766,6 +1766,7 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
     Node node; node.tag = ui::dtb::kFloat; node.scalar = std::bit_cast<uint32_t>(v); return node;
   };
   const auto layout = ui::PortraitSongs(aspect);
+  const auto offer = ui::PortraitStoreOffer(aspect);
   const auto append = [&](const char* panel, const char* method, std::vector<Node> commands) {
     auto* target = PanelMethod(&staged, panel, method);
     if (!target) { if (why) *why = std::string("portrait store lifecycle missing: ") + panel + "." + method; return false; }
@@ -1798,15 +1799,13 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
     commands.push_back(c({s("rating.grp"), s("set_local_pos"), f(0), f(0), f(0)}));
     // Credit generation writes landscape geometry on every refresh. Reapply
     // the portrait bounds after it, keeping optional credit visibility intact.
-    for (const auto& [name, z, size, height] : {
-        std::tuple{"song.lbl", 140.f, 20.f, 36.f}, {"drm.lbl", 100.f, 15.f, 22.f},
-        {"rating.lbl", 72.f, 12.f, 18.f}, {"rating_description.lbl", 52.f, 12.f, 18.f},
-        {"cost.lbl", 32.f, 12.f, 18.f}, {"cost_ps3.lbl", 12.f, 12.f, 18.f}}) {
-      commands.push_back(position(name, -layout.width / 2 + 8, z));
-      for (const auto& [property, value] : {std::pair{"width", layout.width - 16}, {"height", height}})
-        commands.push_back(c({s(name), s("set"), s(property), f(value)}));
-      commands.push_back(c({s(name), s("set"), Node::Array({s("styles"), Node::Int(0), s("text_size")}), f(size)}));
+    for (const auto& text : ui::PortraitStoreOfferLabels(offer)) {
+      commands.push_back(position(text.name.data(), offer.Left(), text.top));
+      for (const auto& [property, value] : {std::pair{"width", offer.TextWidth()}, {"height", text.height}})
+        commands.push_back(c({s(text.name), s("set"), s(property), f(value)}));
+      commands.push_back(c({s(text.name), s("set"), Node::Array({s("styles"), Node::Int(0), s("text_size")}), f(text.size)}));
     }
+    commands.push_back(c({s("store_details_panel"), s("rbbz_portrait_offer_layout"), s("TRUE")}));
     if (!append("store_info_panel", "refresh_panel", commands)) return false;
     if (auto* refresh = PanelMethod(&staged, "store_info_panel", "refresh_buttons")) {
       // The focused list dispatches the current action through its native
@@ -1830,56 +1829,48 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
                 c({s("buttons.lst"), s("selected_sym")})})}),
           c({s("store_info.ihp"), s("clear_action_token"), s("kAction_Confirm")})}));
     }
-    // All states share this private native scene: downloading, completion,
-    // failure and leave-without-refresh confirmation retain their own handlers.
-    for (auto& root : staged) {
-      if (root.tag != ui::dtb::kCommand || root.kids.size() < 3) continue;
-      if (root.kids[2].text != store::kDownloadPanelName && root.kids[2].text != "rbbz_library_panel") continue;
-      for (auto& member : root.kids)
-        if (member.tag == ui::dtb::kArray && member.kids.size() == 2 && member.kids[0].text == "file")
-          member.kids[1] = Node::String("../error/portrait_store_dialog.milo");
-      const auto actions = [&](const auto& self, Node& node) -> void {
-        if (node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
-            node.kids[0].text == "continue.lbl" &&
-            (node.kids[1].text == "set_token_fmt" || node.kids[1].text == "set_display_text_string")) {
-          const bool token = node.kids[1].text == "set_token_fmt";
-          const auto value = node.kids[2].text;
-          const bool refresh = token && value == store::kDownloadRefreshToken;
-          std::string caption;
-          if (!token) {
-            constexpr std::string_view confirm = "<alt1>A</alt1> ";
-            if (value.starts_with(confirm)) {
-              caption = value.substr(confirm.size(), value.find("<alt1>B</alt1>") - confirm.size());
-              while (!caption.empty() && caption.back() == ' ') caption.pop_back();
-            }
-          }
-          const bool primary = refresh || !caption.empty();
-          const bool close = token || value.find("<alt1>B</alt1>") != std::string::npos;
-          node = c({s("do"),
-              c({s("continue.lbl"), s(refresh ? "set_token_fmt" : "set_display_text_string"),
-                  refresh ? s("rbbz_portrait_refresh") : Node::String(caption)}),
-              c({s("continue.lbl"), s("set_showing"), s(primary ? "TRUE" : "FALSE")}),
-              c({s("portrait_dialog_close.lbl"), s("set_display_text_string"), Node::String("X")}),
-              c({s("portrait_dialog_close.lbl"), s("set_showing"), s(close ? "TRUE" : "FALSE")})});
-          return;
-        }
-        for (auto& kid : node.kids) self(self, kid);
-      };
-      actions(actions, root);
-    }
   } else {
     for (const auto& [panel, method, name, resource] : {
         std::tuple{"store_menu_panel", "enter", "filter.lst", "portrait_store_menu"},
         {"store_menu_panel", "new_provider", "filter.lst", "portrait_store_menu"},
         {"store_browser_panel", "refresh_list", "song.lst", "portrait_store_browser"}}) {
-      auto commands = list(name, layout.rows, resource, layout.list_z);
+      const bool menu = std::string_view(name) == "filter.lst";
+      auto commands = list(name, layout.rows, resource,
+                           menu ? ui::kPortraitStoreMenuRowZ : ui::kPortraitStoreBrowserRowZ);
+      if (!menu)
+        commands.push_back(c({s("store_details_panel"), s("rbbz_portrait_offer_layout"), s("FALSE")}));
       commands.push_back(c({s("portrait_tab_store.lbl"), s("set_token_fmt"), s("store")}));
       if (!append(panel, method, commands)) return false;
     }
     if (!append("store_menu_panel", "enter", {
         c({s("store_banner_panel"), s("set_album_visibility"), s("FALSE")})})) return false;
     if (!append("store_details_panel", "refresh", {
-        scale(s("difficulty"), .28f), position("difficulty", layout.width / 2 - 30, -178)})) return false;
+        scale(s("difficulty"), .28f)})) return false;
+    // The browser and the offer screen share this panel and its art loader.
+    // Switch the geometry when the browser binds its provider or opens an offer.
+    const auto place_details = [&](bool expanded) {
+      const auto show = [&](const char* name, bool showing) {
+        return c({s(name), s("set_showing"), s(showing ? "TRUE" : "FALSE")});
+      };
+      const float left = expanded ? offer.Left() : -layout.width / 2 + 54;
+      const float z = expanded ? offer.ExtrasTop() : -151.f;
+      return c({s("do"),
+          scale(s("album.mesh"), expanded ? offer.art_size / 40 : 1),
+          position("album.mesh", expanded ? 0.f : -layout.width / 2 + 27,
+                   expanded ? offer.ArtZ() : layout.card_z),
+          show("portrait_store_card.mesh", !expanded), show("portrait_store_card_border.mesh", !expanded),
+          show("portrait_store_cover.mesh", expanded), show("portrait_store_cover_border.mesh", expanded),
+          show("artist.lbl", !expanded),
+          position("album.lbl", left, z), position("genre.lbl", left, z - (expanded ? 10 : 12)),
+          position("year.lbl", left, z - (expanded ? 23 : 24)),
+          position("difficulty", layout.width / 2 - 30, expanded ? z - 24 : -178.f)});
+    };
+    for (auto& root : staged) {
+      if (root.tag != ui::dtb::kCommand || root.kids.size() < 3 || root.kids[2].text != "store_details_panel") continue;
+      root.kids.push_back(Node::Array({s("rbbz_portrait_offer_layout"), Node::Array({Node::Var("expanded")}),
+          c({s("if_else"), Node::Var("expanded"), place_details(true), place_details(false)})}));
+      break;
+    }
     // Retire the landscape rails/banner and loading chrome after their state
     // callbacks, which can otherwise re-show them after a catalogue request.
     const auto suppress = [&](const auto& self, Node& node) -> void {
@@ -1892,6 +1883,50 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
       for (auto& kid : node.kids) self(self, kid);
     };
     for (auto& root : staged) suppress(suppress, root);
+  }
+  // Search and transfer status share one portrait scene and retain
+  // their native poll and input handlers.
+  for (auto& root : staged) {
+    if (root.tag != ui::dtb::kCommand || root.kids.size() < 3) continue;
+    const auto& panel = root.kids[2].text;
+    if (panel != store::kSearchLoadingPanel && panel != store::kDownloadPanelName &&
+        panel != "rbbz_library_panel") continue;
+    for (auto& member : root.kids)
+      if (member.tag == ui::dtb::kArray && member.kids.size() == 2 && member.kids[0].text == "file")
+        member.kids[1] = Node::String("../error/portrait_store_dialog.milo");
+    const auto actions = [&](const auto& self, Node& node) -> void {
+      if (node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
+          node.kids[0].text == "continue.lbl" &&
+          (node.kids[1].text == "set_token_fmt" || node.kids[1].text == "set_display_text_string")) {
+        const bool token = node.kids[1].text == "set_token_fmt";
+        const auto value = node.kids[2].text;
+        const bool refresh = token && value == store::kDownloadRefreshToken;
+        const bool cancel = token && (value == store::kDownloadCancelToken || value == store::kSearchCancelToken);
+        std::string caption, close_caption;
+        if (!token) {
+          constexpr std::string_view confirm = "<alt1>A</alt1> ";
+          constexpr std::string_view dismiss = "<alt1>B</alt1> ";
+          const auto back = value.find(dismiss);
+          if (value.starts_with(confirm)) {
+            caption = value.substr(confirm.size(), back - confirm.size());
+            while (!caption.empty() && caption.back() == ' ') caption.pop_back();
+          }
+          if (back != std::string::npos) close_caption = value.substr(back + dismiss.size());
+        }
+        const bool primary = refresh || !caption.empty();
+        const bool close = token || !close_caption.empty();
+        node = c({s("do"),
+            c({s("continue.lbl"), s(refresh ? "set_token_fmt" : "set_display_text_string"),
+                refresh ? s("rbbz_portrait_refresh") : Node::String(caption)}),
+            c({s("continue.lbl"), s("set_showing"), s(primary ? "TRUE" : "FALSE")}),
+            c({s("portrait_dialog_close.lbl"), s(token ? "set_token_fmt" : "set_display_text_string"),
+                token ? s(cancel ? "cancel" : "rbbz_portrait_close") : Node::String(close_caption)}),
+            c({s("portrait_dialog_close.lbl"), s("set_showing"), s(close ? "TRUE" : "FALSE")})});
+        return;
+      }
+      for (auto& kid : node.kids) self(self, kid);
+    };
+    actions(actions, root);
   }
   *roots = std::move(staged);
   return true;
@@ -2828,8 +2863,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           note("the Download label was refused: " + why);
         }
         screen::AddLocaleEntry(&roots, "store_delete_song", "Delete", &why);
-        if (portrait_interface)
+        if (portrait_interface) {
           screen::AddLocaleEntry(&roots, "rbbz_portrait_refresh", "Refresh", &why);
+          screen::AddLocaleEntry(&roots, "rbbz_portrait_close", "Close", &why);
+        }
         screen::AddLocaleEntry(&roots, "store_checking_library", "Checking installed songs...", &why);
         // P9-7's footer caption: the store's Start button now opens the Search Song Filter page, so
         // its inline help names that page instead of the scene's `inline_help_options`

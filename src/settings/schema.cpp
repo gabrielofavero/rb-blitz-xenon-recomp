@@ -397,7 +397,7 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kMusicPlayer, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "music_player"}, "main_menu_extra", "Music Player",
-                     "Show the music player at the bottom right of the main menu. Requires Music Source: Library."));
+                     "Show the main menu music player. Requires Library music."));
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),

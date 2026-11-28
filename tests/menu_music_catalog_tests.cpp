@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   { std::ofstream(root / "extracted" / "songs" / "songs.dta") << "metadata"; }
   const auto cache = root / "catalog.cache";
   const PoolEntry song{"old_alias", "songs/Track/Track", "CaseSensitiveKey", "A \"title\"\nwith a line", "Artist",
-                       "songs/Track/gen/Track_keep.png_xbox"};
+                       "songs/Track/gen/Track_keep.png_xbox", "Album \"Deluxe\""};
   std::vector<catalog::Package> packages{{first, catalog::Identity(first), {song}},
       {second, catalog::Identity(second), {song}},
       {root / "extracted", catalog::Identity(root / "extracted"), {song}}};
@@ -58,10 +58,11 @@ int main(int argc, char** argv) {
   CHECK_TRUE(decoded[0].songs[0].title == song.title);
   CHECK_TRUE(decoded[0].songs[0].song_key == song.song_key);
   CHECK_TRUE(decoded[0].songs[0].artwork_locator == song.artwork_locator);
+  CHECK_TRUE(decoded[0].songs[0].album == song.album);
   CHECK_TRUE(decoded[0].songs[0].alias.empty()); // rebuilt from this boot's package index
   CHECK_FALSE(catalog::Decode(encoded.substr(0, encoded.size()/2), &decoded));
   CHECK_FALSE(catalog::Decode(encoded + "junk", &decoded));
-  CHECK_FALSE(catalog::Decode("RBBMUSIC0\n0\n", &decoded));
+  CHECK_FALSE(catalog::Decode("RBBMUSIC1\n0\n", &decoded));
   auto invalid = packages;
   invalid[0].songs[0].stream = "../outside";
   CHECK_FALSE(catalog::Decode(catalog::Encode(invalid), &decoded));

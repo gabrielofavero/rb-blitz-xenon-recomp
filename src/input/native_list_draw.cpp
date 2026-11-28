@@ -8,7 +8,7 @@
 
 REX_EXTERN(__imp__sub_824E5020); // UIListDir::Draw
 REX_EXTERN(sub_824E56F8);       // UIListDir::ScrollStart (attach and fill spare elements)
-REX_EXTERN(sub_824BF538);       // UIListWidget::ScrollComplete (return spare element)
+REX_EXTERN(sub_824E5788);       // UIListDir::ScrollComplete (dispatch to each widget)
 
 namespace rb_blitz::input {
 void DrawNativeList(PPCContext& ctx, uint8_t* base) {
@@ -31,21 +31,21 @@ void DrawNativeList(PPCContext& ctx, uint8_t* base) {
     return;
   }
 
-  const uint32_t direction = word(resource + 640);
-  const auto call = [&](auto& function, uint32_t object, uint32_t a,
-                        uint32_t b, uint32_t c = 0, uint32_t d = 0) {
+  const uint32_t scroll_direction = resource + 640;
+  const uint32_t previous_direction = word(scroll_direction);
+  const auto call = [&](auto& function, auto... args) {
     PPCContext side(ctx);
     rex::ppc::OpenCallFrame(side, base, 256);
-    rex::ppc::Call<void>(side, base, function, object, a, b, c, d);
+    rex::ppc::Call<void>(side, base, function, resource, state, widgets, args...);
     ctx.fpscr = side.fpscr;
   };
-  call(sub_824E56F8, resource, state, widgets, 1, 1);
+  call(sub_824E56F8, uint32_t(1), uint32_t(1));
   rex::ScopeGuard restore([&] {
-    // Return the last element, not the first: this was a draw-only loan, so
-    // the integer viewport and the ordering of its existing elements stay put.
-    for (auto entry = word(widgets); entry < word(widgets + 4); entry += 4)
-      call(sub_824BF538, word(entry), state, uint32_t(-1));
-    rex::memory::store_and_swap<uint32_t>(base + resource + 640, direction);
+    // Return the entering edge element so the settled rows keep their order.
+    // The directory dispatches to each widget's own completion method.
+    rex::memory::store_and_swap<int32_t>(base + scroll_direction, -1);
+    call(sub_824E5788);
+    rex::memory::store_and_swap<uint32_t>(base + scroll_direction, previous_direction);
   });
   __imp__sub_824E5020(ctx, base);
 }

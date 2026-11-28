@@ -234,6 +234,8 @@ std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool 
       else if (const Node* title = Field(*record, "name")) entry.title = title->kids[1].text;
       if (const Node* artist = Field(*song, "artist")) entry.artist = artist->kids[1].text;
       else if (const Node* artist = Field(*record, "artist")) entry.artist = artist->kids[1].text;
+      if (const Node* album = Field(*song, "album_name")) entry.album = album->kids[1].text;
+      else if (const Node* album = Field(*record, "album_name")) entry.album = album->kids[1].text;
       songs.push_back(std::move(entry));
     }
   }

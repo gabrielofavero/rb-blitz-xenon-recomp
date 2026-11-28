@@ -66,7 +66,7 @@ inline std::vector<std::optional<fs::TreeFingerprint>> Identities(
 
 inline std::string Encode(const std::vector<Package>& packages) {
   std::ostringstream out;
-  out << "RBBMUSIC1\n" << packages.size() << '\n';
+  out << "RBBMUSIC2\n" << packages.size() << '\n';
   for (const auto& package : packages) {
     const auto identity = package.identity.value_or(fs::TreeFingerprint{});
     const auto utf8 = package.path.generic_u8string();
@@ -77,7 +77,7 @@ inline std::string Encode(const std::vector<Package>& packages) {
     for (const auto& song : package.songs)
       out << std::quoted(song.stream) << ' ' << std::quoted(song.song_key) << ' '
           << std::quoted(song.title) << ' ' << std::quoted(song.artist) << ' '
-          << std::quoted(song.artwork_locator) << '\n';
+          << std::quoted(song.artwork_locator) << ' ' << std::quoted(song.album) << '\n';
   }
   return out.str();
 }
@@ -87,7 +87,8 @@ inline bool DecodeUnchecked(const std::string& bytes, std::vector<Package>* pack
   std::istringstream in(bytes);
   std::string magic;
   size_t count = 0, total = 0;
-  if (!(in >> magic >> count) || magic != "RBBMUSIC1" || count > 100000) return false;
+  // Older catalogs are rebuilt so existing libraries pick up album metadata.
+  if (!(in >> magic >> count) || magic != "RBBMUSIC2" || count > 100000) return false;
   std::vector<Package> decoded;
   for (size_t i = 0; i < count; ++i) {
     Package package;
@@ -104,9 +105,11 @@ inline bool DecodeUnchecked(const std::string& bytes, std::vector<Package>* pack
     for (size_t j = 0; j < songs; ++j) {
       PoolEntry song;
       if (!(in >> std::quoted(song.stream) >> std::quoted(song.song_key) >>
-            std::quoted(song.title) >> std::quoted(song.artist) >> std::quoted(song.artwork_locator)) ||
+            std::quoted(song.title) >> std::quoted(song.artist) >> std::quoted(song.artwork_locator) >>
+            std::quoted(song.album)) ||
           song.stream.empty() || song.stream.size() > 4096 || song.song_key.size() > 4096 ||
-          song.title.size() > 4096 || song.artist.size() > 4096 || song.artwork_locator.size() > 4096)
+          song.title.size() > 4096 || song.artist.size() > 4096 || song.artwork_locator.size() > 4096 ||
+          song.album.size() > 4096)
         return false;
       // A catalog can describe only package-relative sources, never another device.
       for (const auto& locator : {song.stream, song.artwork_locator}) {

@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "input/menu_music_nav.h"
 
@@ -26,11 +27,16 @@ struct NowPlayingTrack {
   MusicSource source = MusicSource::kNone;
   size_t song = std::numeric_limits<size_t>::max();
   std::string key, title, artist, artwork_key;
+  std::string album{};
+};
+struct UpcomingTrack {
+  std::string title, artist;
 };
 struct PlaybackUpdate {
   NowPlayingTrack track;
   TransportState state = TransportState::kUnavailable;
   Capabilities capabilities;
+  std::vector<UpcomingTrack> up_next;
 };
 struct CommandResult {
   nav::Request request;

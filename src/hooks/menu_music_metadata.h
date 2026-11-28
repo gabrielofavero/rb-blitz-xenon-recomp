@@ -16,6 +16,7 @@ struct SongMetadata {
   // them for its player, and the store's Downloaded matcher compares exactly these two strings.
   std::string title;
   std::string artist;
+  std::string album;
 };
 
 // Bounded, read-only metadata parsing. Invalid input returns no partial records.

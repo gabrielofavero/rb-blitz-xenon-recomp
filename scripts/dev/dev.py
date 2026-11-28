@@ -16,12 +16,13 @@ HELP = """Usage: bash ./dev.sh [--platform linux|mac|ios|windows] ACTION [argume
 Or load commands in Bash/zsh: source ./dev.sh
 
   build-game [--configure] [build arguments]
+  build-ios [builder arguments]    Bundled iOS IPA on a Mac; --importer for the importer
   run-game [--mobile] [--touch] [--window] [--normal] [--no-dlc] [engine arguments]
   run-game-quick                 Windowed, empty DLC, skip offline dialogs
   build-installer [packager arguments]
   dev-help
 
-Actions: build, run (or run-game), run-normal, run-window, run-mobile,
+Actions: build, build-ios, run (or run-game), run-normal, run-window, run-mobile,
          run-no-dlc (or no-dlc), quick, build-installer (or installer), help
 
 Mobile runs use mobile settings and mouse-as-touch in a portrait window.
@@ -32,7 +33,8 @@ Extra engine arguments follow defaults and retain spaces and punctuation.
 
 Linux/macOS use matching amd64/arm64 release presets. Mac packaging uses the
 existing native .app/.pkg builder; Linux packaging requires its nFPM arguments.
-iOS is selected explicitly on a Mac: bash ./dev.sh --platform ios build
+iOS IPA shortcut on a Mac: ./dev.sh build-ios
+With --platform ios on a Mac:
   build / build-installer       Existing signed/unsigned IPA builder arguments
   run --device ID [--bundle-id ID] [engine arguments]
 iOS launches an already installed app through Xcode devicectl. Desktop window

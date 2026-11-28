@@ -1602,11 +1602,12 @@ rays and flash animation remain intact. Connection and song loading preserve
 their native entry work and fit their content to the portrait width; song tips,
 power-ups and the begin prompt occupy separate vertical slots. Song-loading tips
 use larger wrapped text within the portrait margins. The begin prompt shares
-the Start screen's condensed font and visible text size. The existing
-music player becomes a compact bottom bar with title,
-artist and three outlined controls at least 44 logical pixels square on phone-sized
-surfaces; very small desktop windows scale the bar to remain visible. Landscape retains
-its existing player and splash layout. Host checks exercise state transitions,
+the Start screen's condensed font and visible text size. The music player fills the
+bottom edge in portrait, with its controls inset for the device safe area. Tap the
+white handle or drag it up to see cover artwork, song details and up to three
+upcoming tracks. Drag the handle down or tap above the drawer to close it. In
+landscape the player keeps its original layout, with its right edge anchored to
+a centered 21:9 viewport on wider displays. Host checks exercise state transitions,
 layout bounds, native record preservation, vignette vertex alpha and face indices,
 and pointer actions. The title and main menu were also driven on macOS and compared
 against WebKit snapshots of the HTML at the same aspect ratio. Captures under

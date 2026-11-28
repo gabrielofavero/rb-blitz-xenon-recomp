@@ -17,4 +17,6 @@ bool RoutePlayerPointer(PointerEvent event, float x, float y, int physical_w,
                         int button = 0);
 void CancelPlayerPointer();
 bool PlayerPointerOver();
+// SDL's direct-touch observer calls this before native menu gesture routing.
+bool PlayerOwnsTouchStart(float normalized_x, float normalized_y);
 }  // namespace rb_blitz::ui::music

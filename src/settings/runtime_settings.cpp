@@ -142,7 +142,7 @@ true,
 rex::Setting<bool> rb_blitz::settings::title::enhancements_music_player{
     &rb_blitz::settings::TitleSettingOwner("blitz.enhancements"), "enhancements_music_player",
 true,
-    "Show the clickable music player at the bottom right of the main menu. "
+    "Show the clickable music player on the main menu. "
                     "Independent of pad/key navigation. Requires library background music.",
     rex::kRestart};
 

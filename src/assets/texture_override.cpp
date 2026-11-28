@@ -213,9 +213,8 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
       }
       FontResult result;
       result.revision = job.revision;
-      if (registry_.has_touch)
-        result.touch_calibration = ComposeCalibrationPair(registry_.touch,
-            registry_.touch.InputFor("touch:tap"));
+      const auto* tap = registry_.has_touch ? registry_.touch.InputFor("touch:tap") : nullptr;
+      if (tap) result.touch_calibration = ComposeCalibrationPair(registry_.touch, tap);
       const auto* scheme = registry_.Find(job.scheme);
       for (size_t family = 0; family < result.variants.size(); ++family) {
         input::icons::Icon blank;
@@ -227,6 +226,14 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
           icons[ui::input_font::RowGlyphIndex(static_cast<uint32_t>(i))] = job.rows[i];
         for (size_t i = 0; i < job.hints[family].size() && i < ui::input_font::kHintCount; ++i)
           icons[ui::input_font::kHintFirst + i] = job.hints[family][i];
+        if (tap) {
+          auto& icon = icons[ui::input_font::kCalibrationTapIcon];
+          icon = {};
+          icon.art = input::icons::Art::kPackageImage;
+          icon.width = tap->image.width;
+          icon.height = tap->image.height;
+          icon.rgba = tap->image.rgba;
+        }
         auto& variant = result.variants[family];
         Levels composed;
         if (!input_font_atlas::Compose(*job.original_font, *job.original_buttons,

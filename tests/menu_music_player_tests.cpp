@@ -20,6 +20,30 @@ void TextTests() {
              "California \xC3\x9C" "ber Alles");
   CHECK_TRUE(DisplayTextUtf8("Bj\xF6rk and Caf\xC3\xA9") ==
              "Bj\xC3\xB6rk and Caf\xC3\xA9");
+
+  BeginCase("long titles pause at either end and scroll back to their start");
+  TitleMarquee title;
+  CHECK_EQ(title.Offset(90, 100, 1, 1), 0);
+  CHECK_EQ(title.Offset(100, 100, 1, 25), 0);
+  constexpr double start = 100;
+  const auto shift = [&](double elapsed) { return title.Offset(154, 100, 1, start + elapsed); };
+  CHECK_EQ(shift(0), 0);
+  CHECK_EQ(shift(1.25), 0);
+  CHECK_EQ(shift(2.75), 27);
+  CHECK_EQ(shift(4.25), 54);
+  CHECK_EQ(shift(5.5), 54);
+  CHECK_EQ(shift(7), 27);
+  CHECK_EQ(shift(8.5), 0);
+  CHECK_EQ(shift(11.25), 27);
+
+  BeginCase("title changes and narrower or wider layouts restart at the beginning");
+  title.Reset();
+  CHECK_EQ(shift(12), 0);
+  CHECK_EQ(shift(14.75), 27);
+  CHECK_EQ(title.Offset(154, 110, 1, 115), 0);
+  CHECK_EQ(title.Offset(154, 180, 1, 120), 0);
+  CHECK_EQ(title.Offset(77, 50, .5f, 123), 0);
+  CHECK_EQ(title.Offset(77, 50, .5f, 125.75), 13.5);
 }
 MenuPoint Center(MenuBounds b) {
   return {(b.left + b.right) / 2, (b.top + b.bottom) / 2};
@@ -58,19 +82,25 @@ void PointerTests() {
       CHECK_TRUE(b.Contains(p));
     }
   }
+  const auto wide = PlayerLayout(2520, 1080), superwide = PlayerLayout(3840, 1080);
+  CHECK_EQ(superwide.panel.right - wide.panel.right, (3840 - 2520) / 2);
+  CHECK_EQ(superwide.panel.bottom, wide.panel.bottom);
+  CHECK_EQ(superwide.panel.right - superwide.panel.left, wide.panel.right - wide.panel.left);
   CHECK_EQ(PlayerLayout(0, 0).scale, 0);
-  BeginCase("portrait music player shares a compact bottom bar and full touch targets");
+  BeginCase("portrait music player fills the bottom edge and respects the safe area");
   for (const auto size : {MenuPoint{320, 568}, {402, 874}, {768, 1024}}) {
     const auto compact = PlayerLayout(size.x, size.y);
     CHECK_TRUE(compact.compact);
-    CHECK_TRUE(compact.panel.left > 0 && compact.panel.right < size.x);
+    CHECK_EQ(compact.panel.left, 0);
+    CHECK_EQ(compact.panel.right, size.x);
     CHECK_TRUE(compact.panel.top > size.y * .75f);
-    CHECK_TRUE(compact.panel.bottom <= size.y - 44);
+    CHECK_EQ(compact.panel.bottom, size.y);
+    CHECK_TRUE(compact.expanded_cover_size > 140);
     CHECK_TRUE(compact.controls[0].left > compact.panel.left + 100);
     for (int i = 0; i < 3; ++i) {
       const auto control = compact.controls[i];
-      CHECK_TRUE(control.right - control.left >= 44);
-      CHECK_TRUE(control.bottom - control.top >= 44);
+      CHECK_TRUE(control.right - control.left >= 43.99f);
+      CHECK_TRUE(control.bottom - control.top >= 43.99f);
       CHECK_TRUE(compact.panel.Contains(Center(control)));
       if (i) CHECK_TRUE(compact.controls[i - 1].right < control.left);
       PointerRouter touch;
@@ -82,7 +112,15 @@ void PointerTests() {
   CHECK_FALSE(PlayerLayout(1280, 720).compact);
   const auto narrow = PlayerLayout(203, 360);
   CHECK_TRUE(narrow.compact && narrow.scale > 0);
-  CHECK_TRUE(narrow.panel.left > 0 && narrow.panel.right < 203);
+  CHECK_EQ(narrow.panel.right, 203);
+  const auto safe = PlayerLayout(402, 874, {13, 58, 392, 840});
+  CHECK_EQ(safe.panel.bottom, 874);
+  CHECK_TRUE(safe.cover.left >= 13 && safe.controls[2].right <= 392);
+  CHECK_TRUE(safe.controls[2].bottom <= 840 && safe.expanded_top >= 58);
+  CHECK_TRUE(safe.content.left >= 13 + 27 * safe.scale);
+  CHECK_TRUE(safe.content.right <= 392 - 27 * safe.scale);
+  CHECK_TRUE(safe.expanded_cover_size <= 288 * safe.scale);
+  CHECK_TRUE(safe.expanded_controls[1].bottom + 194 * safe.scale <= 840);
   BeginCase(
       "one release on the armed control posts once; hold, disabled, drag and "
       "boundaries");
@@ -122,6 +160,57 @@ void PointerTests() {
   CHECK_FALSE(router.Route(PointerEvent::kUp, a, 1).clicked.has_value());
   router.Present(layout, 2, 8, false, {true, true, true});
   CHECK_FALSE(router.Route(PointerEvent::kWheel, a).consumed);
+}
+
+void DrawerTests() {
+  BeginCase("portrait handle follows the pointer, settles open and keeps the live transport");
+  PointerRouter router;
+  const auto layout = PlayerLayout(402, 874);
+  const auto handle = Center(layout.Handle(0));
+  const auto settle = [&] {
+    for (int i = 0; i < 40; ++i) router.Animate(1.f / 60);
+  };
+  const auto down = [&](MenuPoint p) { return router.Route(PointerEvent::kDown, p).consumed; };
+  const auto move = [&](MenuPoint p) { return router.Route(PointerEvent::kMove, p).consumed; };
+  const auto up = [&](MenuPoint p) { return router.Route(PointerEvent::kUp, p); };
+  router.Present(layout, 1, 7, true, {true, true, true});
+  CHECK_TRUE(down(handle));
+  CHECK_TRUE(move({handle.x, handle.y - 90}));
+  router.Animate(1.f / 60);
+  CHECK_TRUE(router.expansion() > 0 && router.expansion() < 1);
+  CHECK_TRUE(std::abs(layout.Panel(router.expansion()).top - (layout.panel.top - 90)) < .01f);
+  CHECK_TRUE(up({handle.x, handle.y - 90}).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 1);
+  router.Present(layout, 1, 8, true, {true, true, true});
+  CHECK_EQ(router.expansion(), 1);
+  const auto next = Center(layout.expanded_controls[2]);
+  CHECK_TRUE(down(next));
+  CHECK_EQ(up(next).clicked.value_or(-1), 2);
+  const auto upper_handle = Center(layout.Handle(1));
+  CHECK_TRUE(down(upper_handle));
+  CHECK_TRUE(up({upper_handle.x, upper_handle.y + 120}).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 0);
+
+  BeginCase("drawer taps dismiss safely and cannot take over a gesture started on the guest");
+  const MenuPoint guest{120, 100};
+  CHECK_FALSE(down(guest));
+  CHECK_FALSE(move(handle));
+  CHECK_FALSE(up(handle).consumed);
+  CHECK_TRUE(down(handle));
+  CHECK_TRUE(up(handle).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 1);
+  CHECK_TRUE(down(guest));
+  CHECK_TRUE(up(guest).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 0);
+  CHECK_TRUE(down(handle));
+  router.Cancel();
+  CHECK_TRUE(up(guest).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 0);
 }
 void ArtworkTests() {
   BeginCase(
@@ -222,6 +311,7 @@ void ArtworkTests() {
 int main() {
   TextTests();
   PointerTests();
+  DrawerTests();
   ArtworkTests();
   return test::Finish();
 }

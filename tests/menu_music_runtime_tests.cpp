@@ -277,7 +277,7 @@ void TestNavigatorRuntime() {
   g_nav_epoch = NowPlaying().Reset();
   g_buffers = {kPath}; g_music = kMusic;
   g_session = MusicSession{};
-  g_session.Discover(0, {{"menumusic0", "songs/one/audio", "One", "First", "Artist One"}});
+  g_session.Discover(0, {{"menumusic0", "songs/one/audio", "One", "First", "Artist One", {}, "Album One"}});
   g_session.Discover(1, {{"menumusic1", "songs/two/audio", "Two", "Second", "Artist Two"}});
   g_session.AdoptFirst(0);
   g_session.PlanAhead(g_rng);
@@ -295,6 +295,12 @@ void TestNavigatorRuntime() {
   auto snapshot = NowPlaying().ReadSnapshot();
   CHECK_TRUE(snapshot.available);
   CHECK_TRUE(snapshot.playback.track.title == "First");
+  CHECK_TRUE(snapshot.playback.track.album == "Album One");
+  CHECK_EQ(snapshot.playback.up_next.size(), 1u);
+  if (!snapshot.playback.up_next.empty()) {
+    CHECK_TRUE(snapshot.playback.up_next.front().title == "Second");
+    CHECK_TRUE(snapshot.playback.up_next.front().artist == "Artist Two");
+  }
   CHECK_TRUE(snapshot.playback.capabilities.play_pause);
   bool answer = false;
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
@@ -306,6 +312,7 @@ void TestNavigatorRuntime() {
   CHECK_EQ(LoadBe32(base, kNewStream + kPositionOffset), native_start_position);
   snapshot = NowPlaying().ReadSnapshot();
   CHECK_TRUE(snapshot.playback.track.key == "Two");
+  CHECK_TRUE(snapshot.playback.up_next.empty());
   CHECK_TRUE(snapshot.result && snapshot.result->status == nav::CompletionStatus::kApplied);
   CHECK_FALSE(snapshot.pending);
   CHECK_TRUE(SelectedSongKey() == "Two"); // no old-song grace after manual skip
@@ -321,6 +328,9 @@ void TestNavigatorRuntime() {
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
   sub_827586D8(ctx, base);
   CHECK_EQ(g_session.Cursor(), 0u); CHECK_TRUE(SelectedSongKey() == "One");
+  snapshot = NowPlaying().ReadSnapshot();
+  CHECK_EQ(snapshot.playback.up_next.size(), 1u);
+  if (!snapshot.playback.up_next.empty()) CHECK_TRUE(snapshot.playback.up_next.front().title == "Second");
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
   sub_827586D8(ctx, base);
   CHECK_EQ(g_session.Cursor(), 1u); CHECK_TRUE(SelectedSongKey() == "Two");
