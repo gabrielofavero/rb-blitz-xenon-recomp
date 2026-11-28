@@ -168,7 +168,7 @@ void DrawerTests() {
   BeginCase("portrait handle follows the pointer, settles open and keeps the live transport");
   PointerRouter router;
   const auto layout = PlayerLayout(402, 874);
-  const auto handle = Center(layout.Handle(0));
+  const MenuPoint handle{Center(layout.content).x, layout.panel.top + 11 * layout.scale};
   const auto settle = [&] {
     for (int i = 0; i < 40; ++i) router.Animate(1.f / 60);
   };
@@ -189,9 +189,24 @@ void DrawerTests() {
   const auto next = Center(layout.expanded_controls[2]);
   CHECK_TRUE(down(next));
   CHECK_EQ(up(next).clicked.value_or(-1), 2);
-  const auto upper_handle = Center(layout.Handle(1));
-  CHECK_TRUE(down(upper_handle));
-  CHECK_TRUE(up({upper_handle.x, upper_handle.y + 120}).consumed);
+  BeginCase("expanded portrait player collapses with a drag or tap across the header");
+  const MenuPoint header_left{layout.panel.left + 8, layout.expanded_top + 36 * layout.scale};
+  CHECK_TRUE(down(header_left));
+  CHECK_TRUE(up({header_left.x, header_left.y + 120}).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 0);
+  CHECK_TRUE(down(handle));
+  CHECK_TRUE(up(handle).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 1);
+  const MenuPoint artwork{handle.x, layout.expanded_top + 60 * layout.scale};
+  CHECK_TRUE(down(artwork));
+  CHECK_TRUE(up({artwork.x, artwork.y + 120}).consumed);
+  settle();
+  CHECK_EQ(router.expansion(), 1);
+  const MenuPoint header_right{layout.panel.right - 8, header_left.y};
+  CHECK_TRUE(down(header_right));
+  CHECK_TRUE(up(header_right).consumed);
   settle();
   CHECK_EQ(router.expansion(), 0);
 

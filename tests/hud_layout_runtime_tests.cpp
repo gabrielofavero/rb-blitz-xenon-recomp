@@ -3,6 +3,7 @@
 #include "check.h"
 #include "hooks/hud_layout_runtime.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <chrono>
@@ -33,6 +34,7 @@ constexpr uint32_t kHud = kHeap + 0x100;
 constexpr uint32_t kOtherDir = kHeap + 0x500;
 uint32_t next_string = kHeap + 0xD000;
 uint32_t next_table = kTables;
+uint32_t progress_object = 0, progress_drawable = 0;
 unsigned original_calls = 0;
 unsigned dirty_calls = 0, draw_calls = 0;
 std::array<uint32_t, 16> transforms{};
@@ -66,7 +68,7 @@ uint32_t Text(const char* text) {
 }
 void ObjectView(uint32_t derived, uint32_t header) {
   const uint32_t table = next_table;
-  next_table += 16;
+  next_table += 24;
   Word(derived + 4, table);
   Word(table + 4, header - derived - 4);
 }
@@ -74,6 +76,7 @@ void Reset() {
   rb_blitz::ui::PublishPortraitViewport({});
   std::memset(memory + kHeap, 0, 0x10000);
   transforms = {}; drawn_child = 0;
+  progress_object = progress_drawable = 0;
   next_string = kHeap + 0xD000;
   next_table = kTables;
   width = 2560; height = 1080; crop_width = crop_height = 0;
@@ -99,11 +102,17 @@ uint32_t Make(unsigned slot, const Shape& shape, float x, uint32_t dir = kHud,
   Word(header, shape.vtable);
   Word(header + 32, Text(shape.name));
   Word(header + 36, dir);
+  for (uint32_t axis = 0; axis < 3; ++axis) Float(t + 8 + axis * 20, 1);
   Float(t + 0x38, x); Float(t + 0x3C, 25); Float(t + 0x40, 4.35f);
   Word(t + 0x94, parent);
   memory[t + 189] = 1;
   transforms[slot] = t;
   return t;
+}
+void ShowProgressBar(uint32_t transformable) {
+  progress_object = transformable - 0x7C;
+  progress_drawable = transformable + 0x300;
+  memory[progress_drawable + 8] = 1;
 }
 void Resolve(uint32_t t) {
   PPCContext ctx{}; ctx.r1.u32 = kHeap + 0x10000;
@@ -176,7 +185,8 @@ extern "C" REX_FUNC(__imp__sub_821F13D0) {
   }
   for (uint32_t row = 0; row < 3; ++row)
     for (uint32_t column = 0; column < 3; ++column)
-      Float(t + 72 + row * 16 + column * 4, parent ? Float(parent + 72 + row * 16 + column * 4) : (row == column ? 1.f : 0.f));
+      Float(t + 72 + row * 16 + column * 4,
+            Float((parent ? parent + 72 : t + 8) + row * 16 + column * 4));
   for (uint32_t axis = 0; axis < 12; axis += 4) {
     Float(t + 0x78 + axis, Float(t + 0x38 + axis) +
           (parent ? Float(parent + 0x78 + axis) : 0));
@@ -212,6 +222,22 @@ extern "C" REX_FUNC(__imp__sub_821F65C8) {
 }
 extern "C" REX_FUNC(__imp__sub_82226CD8) { __imp__sub_821F65C8(ctx, base); }
 
+extern "C" REX_FUNC(sub_82402DE8) {
+  CHECK_EQ(ctx.r3.u32, kHud);
+  CHECK_TRUE(std::strcmp(reinterpret_cast<const char*>(base + ctx.r4.u32),
+                         "progress_bar.sld") == 0);
+  CHECK_EQ(ctx.r5.u32, 0u);
+  CHECK_EQ(ctx.r6.u32, 0u);
+  ctx.r3.u64 = progress_object;
+}
+
+extern "C" REX_FUNC(sub_824EC398) {
+  CHECK_EQ(ctx.r3.u32, progress_object);
+  CHECK_EQ(ctx.r5.u32, 0x8280056Cu);
+  CHECK_EQ(ctx.r6.u32, 0x82805FFCu);
+  ctx.r3.u64 = progress_drawable;
+}
+
 int main() {
   CHECK_TRUE(rb_blitz::settings::RegisterTitleSettings(REX_SETTINGS()).has_value());
   CHECK_TRUE(rb_blitz::settings::title::show_run_comparison.Set(true).has_value());
@@ -234,16 +260,17 @@ int main() {
 
 #if !defined(RB_BLITZ_IOS)
   BeginCase("16:9 and disabled reanchoring inspect no guest metadata");
+  PPCContext unused_ctx{};
   width = 0;
-  rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
+  rb_blitz::hooks::HudReanchorWorld(unused_ctx, nullptr, kHeap);
   width = 1920;
-  rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
+  rb_blitz::hooks::HudReanchorWorld(unused_ctx, nullptr, kHeap);
   width = 2560;
   CHECK_TRUE(rb_blitz::settings::title::hud_reanchor.Set(false).has_value());
-  rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
+  rb_blitz::hooks::HudReanchorWorld(unused_ctx, nullptr, kHeap);
   CHECK_TRUE(rb_blitz::settings::title::hud_reanchor.Set(true).has_value());
   CHECK_TRUE(rb_blitz::settings::title::hud_reanchor_apply.Set(false).has_value());
-  rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
+  rb_blitz::hooks::HudReanchorWorld(unused_ctx, nullptr, kHeap);
   CHECK_TRUE(rb_blitz::settings::title::hud_reanchor_apply.Set(true).has_value());
 #endif
 
@@ -342,21 +369,25 @@ int main() {
   const auto portrait_meter = Make(2, shapes[1], -300);
   const auto portrait_comparison = Make(3, shapes[4], 300);
   const auto portrait_letters = Make(5, shapes[2], -294);
+  ShowProgressBar(Make(6, slider, 0));
+  const double portrait_half_width = 400.0 / 720 * 240;
+  const double portrait_star_scale = (portrait_half_width - 62) / 176;
+  const double portrait_score_scale = (portrait_half_width - 68) / 156;
   for (int frame = 0; frame < 20; ++frame) {
     Resolve(portrait_stars);
     Resolve(portrait_score);
     Resolve(portrait_meter);
     Resolve(portrait_comparison);
     Resolve(portrait_letters);
-    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 12.5);
-    Close(Float(portrait_stars + 0x80), 232);
-    Close(Float(portrait_score + 0x78), 10 - 400.0 / 720 * 240);
-    Close(Float(portrait_score + 0x80), 232);
+    Close(Float(portrait_stars + 0x78), portrait_half_width - 4 - 17 * portrait_star_scale);
+    Close(Float(portrait_stars + 0x80), 228);
+    Close(Float(portrait_score + 0x78), 10 - portrait_half_width);
+    Close(Float(portrait_score + 0x80), 228);
     Close(Float(portrait_meter + 0x80), 0);
     Close(Float(portrait_comparison + 0x80), 0);
     Close(Float(portrait_letters + 0x80), 110);
-    Close(Float(portrait_stars + 72), .5);
-    Close(Float(portrait_score + 72), .5); // parent scale inherited exactly once
+    Close(Float(portrait_stars + 72), portrait_star_scale);
+    Close(Float(portrait_score + 72), portrait_score_scale); // parent scale inherited exactly once
     Close(Float(portrait_meter + 72), .55);
     Close(Float(portrait_comparison + 72), .65);
     Close(Float(portrait_stars + 0x38), 270); // local animation data stays authored
@@ -384,9 +415,13 @@ int main() {
   width = 1280; height = 720; crop_width = 405; crop_height = 720;
   const auto cropped_stars = Make(0, shapes[0], 270);
   const auto cropped_meter = Make(1, shapes[1], -300);
+  const auto cropped_progress = Make(6, slider, 123);
+  ShowProgressBar(cropped_progress);
   Resolve(cropped_stars); Resolve(cropped_meter);
-  Close(Float(cropped_stars + 0x78), 122.5);
-  Close(Float(cropped_meter + 0x78), -63.2);
+  constexpr double cropped_star_scale = 73.0 / 176;
+  constexpr double cropped_star_x = 135 - 4 - 17 * cropped_star_scale;
+  Close(Float(cropped_stars + 0x78), cropped_star_x);
+  Close(Float(cropped_meter + 0x78), -76.35);
   const Shape timer_shape{"timer.lbl", 0x8203A95C, 0x7C, 0};
   const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
   Resolve(cropped_timer);
@@ -405,17 +440,13 @@ int main() {
   Close(Float(cropped_streak + 0x78), -123);
   Close(Float(cropped_streak + 0x80), -80);
   Close(Float(cropped_streak + 72), 1.2);
-  BeginCase("the multiplier ladder keeps room for instrument badges at the left edge");
-  Close(Float(cropped_meter + 0x78), -63.2);
-  Close(Float(cropped_meter + 0x80), 0);
-  Close(Float(cropped_meter + 72), .55);
   const auto cropped_score = Make(4, shapes[5], 270);
   Resolve(cropped_score);
   Close(Float(cropped_score + 0x78), -125);
-  Close(Float(cropped_score + 72), .5);
+  Close(Float(cropped_score + 72), 67.0 / 156);
   const auto cropped_comparison = Make(5, shapes[4], 300);
   Resolve(cropped_comparison);
-  Close(Float(cropped_comparison + 0x78), 80.2);
+  Close(Float(cropped_comparison + 0x78), 123.2);
   Close(Float(cropped_comparison + 0x80), 0);
   Close(Float(cropped_comparison + 72), .65);
 
@@ -433,26 +464,109 @@ int main() {
   Resolve(personal_best);
   Close(Float(personal_best + 0x78), 123);
 
-  BeginCase("portrait song progress keeps its authored basis under the stars");
-  const auto cropped_progress = Make(6, slider, 123);
+  BeginCase("portrait song progress undoes the authored rotation at the top center");
+  Float(cropped_progress + 8, 0);
+  Float(cropped_progress + 16, 1);
+  Float(cropped_progress + 40, -1);
+  Float(cropped_progress + 48, 0);
   for (int frame = 0; frame < 30; ++frame) {
     Resolve(cropped_progress);
-    Close(Float(cropped_progress + 0x78), 119);
-    Close(Float(cropped_progress + 0x80), 118.6);
-    Close(Float(cropped_progress + 72), .35);
+    Close(Float(cropped_progress + 0x78), -46.44);
+    Close(Float(cropped_progress + 0x80), 228.6);
+    Close(Float(cropped_progress + 72), .54);
     Close(Float(cropped_progress + 80), 0);
-    Close(Float(cropped_progress + 92), .35);
+    Close(Float(cropped_progress + 92), .54);
     Close(Float(cropped_progress + 104), 0);
-    Close(Float(cropped_progress + 112), .35);
+    Close(Float(cropped_progress + 112), .54);
+    Close(Float(cropped_progress + 16), 1);
   }
+  BeginCase("top portrait HUD fits the widest score and five stars beside the centered bar");
+  for (const uint32_t portrait_width : {405u, 330u}) {
+    crop_width = portrait_width;
+    Resolve(cropped_progress); Resolve(cropped_score); Resolve(cropped_stars);
+    const float bar_pivot = Float(cropped_progress + 0x78);
+    const float bar_scale = Float(cropped_progress + 72);
+    const float score_right = Float(cropped_score + 0x78) + 156 * Float(cropped_score + 72);
+    const float stars_left = Float(cropped_stars + 0x78) - 159 * Float(cropped_stars + 72);
+    const float bar_left = bar_pivot - 14 * bar_scale;
+    const float bar_right = bar_pivot + 186 * bar_scale;
+    Close(bar_left, -bar_right);
+    CHECK_TRUE(score_right + 3 < bar_left);
+    CHECK_TRUE(stars_left - 3 > bar_right);
+    Close(Float(cropped_progress + 0x80) + 10 * Float(cropped_progress + 112), 234);
+    CHECK_TRUE(Float(cropped_progress + 0x80) > Float(cropped_score + 0x80));
+  }
+  crop_width = 405;
+
+  BeginCase("hiding the progress bar restores regular portrait sizes on a clean draw");
+  PPCContext score_draw{};
+  score_draw.r1.u32 = kHeap + 0x10000;
+  const auto draw_stats = [&] {
+    Draw(cropped_stars, shapes[0]);
+    rb_blitz::hooks::PrepareHudLabel(score_draw, memory, cropped_score);
+  };
+  draw_stats();
+  Close(Float(cropped_score + 72), 67.0 / 156);
+  Close(Float(cropped_stars + 72), cropped_star_scale);
+  memory[progress_drawable + 8] = 0;
+  draw_stats();
+  Close(Float(cropped_score + 72), .5);
+  Close(Float(cropped_stars + 72), .5);
+  Close(Float(cropped_stars + 0x78), 122.5);
+  memory[progress_drawable + 8] = 1;
+  draw_stats();
+  Close(Float(cropped_score + 72), 67.0 / 156);
+  Close(Float(cropped_stars + 72), cropped_star_scale);
+  progress_object = 0;
+  draw_stats();
+  Close(Float(cropped_score + 72), .5);
+  Close(Float(cropped_stars + 72), .5);
+
+  const uint32_t slider_base = cropped_progress + 0x200;
+  ObjectView(slider_base, cropped_progress - 0x7C);
+  Word(Word(slider_base + 4) + 16, cropped_progress - slider_base - 4);
+  PPCContext slider_draw{};
+  slider_draw.r1.u32 = kHeap + 0x10000;
+  Float(cropped_progress + 0x78, 123);  // a clean authored cache from before portrait placement
+  rb_blitz::hooks::PrepareHudSlider(slider_draw, memory, slider_base);
+  Close(Float(cropped_progress + 0x78), -46.44);
+  rb_blitz::ui::PublishPortraitViewport({402, 874, 0, 62, 402, 778});
+  rb_blitz::hooks::PrepareHudSlider(slider_draw, memory, slider_base);
+  Close(Float(cropped_progress + 0x80), 228.6 - 62.0 / 874 * 480);
+  rb_blitz::ui::PublishPortraitViewport({});
+
+  BeginCase("portrait hides the localized Your Best caption only in the gameplay HUD");
+  const Shape comparison_label{"name.lbl", 0x8203A95C, 0x7C, 0};
+  const auto best_caption = Make(9, comparison_label, 0);
+  const auto player_caption = Make(10, comparison_label, 0);
+  const auto menu_caption = Make(11, comparison_label, 0, kOtherDir);
+  Word(best_caption + 164, Text("your_best"));
+  Word(player_caption + 164, Text("you"));
+  Word(menu_caption + 164, Text("your_best"));
+  CHECK_TRUE(rb_blitz::hooks::HidePortraitHudLabel(memory, best_caption));
+  CHECK_TRUE(!rb_blitz::hooks::HidePortraitHudLabel(memory, player_caption));
+  CHECK_TRUE(!rb_blitz::hooks::HidePortraitHudLabel(memory, menu_caption));
   crop_width = crop_height = 0;
   Resolve(cropped_meter); Resolve(cropped_timer); Resolve(cropped_progress);
   Close(Float(cropped_timer + 0x78), -423); // landscape local placement remains authored
-  Close(Float(cropped_progress + 72), 1);
-  Close(Float(cropped_progress + 80), 0);
-  Close(Float(cropped_progress + 104), 0);
-  Close(Float(cropped_progress + 112), 1);
+  Close(Float(cropped_progress + 72), 0);
+  Close(Float(cropped_progress + 80), 1);
+  Close(Float(cropped_progress + 104), -1);
+  Close(Float(cropped_progress + 112), 0);
   Close(Float(cropped_progress + 0x78), 123);
+  CHECK_TRUE(!rb_blitz::hooks::HidePortraitHudLabel(memory, best_caption));
+
+  BeginCase("the multiplier ladder keeps its backing just inside the portrait edge");
+  crop_height = 720;
+  for (const uint32_t portrait_width : {405u, 330u}) {
+    crop_width = portrait_width;
+    const double half_width = 240.0 * portrait_width / crop_height;
+    Resolve(cropped_meter);
+    const float scale = Float(cropped_meter + 72);
+    Close(scale, .55 * std::min(1.0, half_width / 120));
+    Close(Float(cropped_meter + 0x78) - 103 * scale + half_width, 2);
+    Close(Float(cropped_meter + 0x80), 0);
+  }
 
 #if defined(RB_BLITZ_IOS)
   BeginCase("mobile top HUD follows cutouts and refreshes cached art when the safe area changes");
@@ -466,17 +580,17 @@ int main() {
   Float(top_bar + 0x40, 185);
   const auto top_score = Make(2, shapes[5], 270);
   Resolve(top_bar); Resolve(top_score);
-  const float first_inset = 62.f / 874 * 480 + 8;
-  Close(Float(top + 0x80), 12 - first_inset);
-  Close(Float(top_bar + 0x80), 197 - first_inset);
-  Close(Float(top_score + 0x80), 232 - first_inset);
+  const float first_inset = 62.f / 874 * 480;
+  Close(Float(top + 0x80), 16 - first_inset);
+  Close(Float(top_bar + 0x80), 201 - first_inset);
+  Close(Float(top_score + 0x80), 228 - first_inset);
   Close(Float(top + 72), 1); // native Blitz animation size is preserved
   Draw(top, top_shape, true);
   rb_blitz::ui::PublishPortraitViewport({402, 874, 0, 80, 402, 760});
   Draw(top, top_shape, true);
   CHECK_EQ(memory[top_bar + 189], 1);
   Resolve(top_bar);
-  Close(Float(top_bar + 0x80), 197 - (80.f / 874 * 480 + 8));
+  Close(Float(top_bar + 0x80), 201 - 80.f / 874 * 480);
   // The top row follows the safe area independently of the pause disc.
   const auto mobile_stars = Make(3, shapes[0], 270);
   const Shape mobile_pause_shape{"touch_pause.grp", 0x82024C4C, -0x108, -1};
@@ -485,8 +599,8 @@ int main() {
   touch_layout = {402, 874, {12, 150, 44, 44}};
   using_touch = true;
   Resolve(mobile_stars); Resolve(mobile_pause);
-  const float second_inset = 80.f / 874 * 480 + 8;
-  Close(Float(mobile_stars + 0x80), 232 - second_inset);
+  const float second_inset = 80.f / 874 * 480;
+  Close(Float(mobile_stars + 0x80), 228 - second_inset);
   Close(Float(mobile_stars + 72), .5);
   Close(Float(mobile_stars + 0x78), 122.5);
   CHECK_TRUE(Float(mobile_pause + 0x80) < Float(mobile_stars + 0x80));
@@ -494,7 +608,7 @@ int main() {
   touch_layout.pause.y += 10;
   Draw(mobile_stars, shapes[0], true);
   Resolve(mobile_pause);
-  Close(Float(mobile_stars + 0x80), 232 - second_inset);
+  Close(Float(mobile_stars + 0x80), 228 - second_inset);
   touch_layout = previous_layout;
   using_touch = false;
   BeginCase("the centered timer updates when only the bottom inset changes");

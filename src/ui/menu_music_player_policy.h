@@ -23,10 +23,10 @@ struct Layout {
     if (compact) bounds.top = std::lerp(panel.top, expanded_top, expansion);
     return bounds;
   }
-  MenuBounds Handle(float expansion) const {
-    const float center = (content.left + content.right) * .5f;
-    const float top = Panel(expansion).top;
-    return {center - 66 * scale, top, center + 66 * scale, top + 30 * scale};
+  MenuBounds Header(float expansion) const {
+    auto bounds = Panel(expansion);
+    bounds.bottom = bounds.top + 48 * scale;
+    return bounds;
   }
 };
 
@@ -217,7 +217,7 @@ class PointerRouter {
         return;
       }
     }
-    if (layout_.compact && (layout_.Handle(expansion_).Contains(p) || expansion_ == 0)) {
+    if (layout_.compact && (layout_.Header(expansion_).Contains(p) || expansion_ == 0)) {
       dragging_ = true;
       drag_moved_ = false;
       drag_start_y_ = p.y;

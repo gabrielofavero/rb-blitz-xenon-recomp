@@ -89,6 +89,32 @@ int main() {
                pause.list_scale > -pause.height / 2 + 10);
     CHECK_TRUE(kPortraitMenuRowStep > 55.25f);
   }
+  BeginCase("portrait score breakdown fits the ratings, scoring rows, powerups and footer");
+  CHECK_TRUE(PortraitSplashScreen("results_breakdown_screen", "results_breakdown_panel"));
+  CHECK_FALSE(PortraitSplashScreen("song_results_screen", "song_results_panel"));
+  for (const float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
+    const auto layout = PortraitResults(aspect);
+    CHECK_TRUE(layout.width < PortraitSplash(aspect).width);
+    CHECK_TRUE(layout.stars_z - 22 * layout.StarsScale() > layout.rail_top);
+    CHECK_TRUE(layout.RowZ(0) + 8 < layout.rail_top);
+    CHECK_TRUE(layout.RowZ(3) - 8 > layout.powerup_icon_z + 37.5f * layout.PowerupScale());
+    CHECK_TRUE(layout.powerup_icon_z - 37.5f * layout.PowerupScale() > layout.powerup_name_z + 9);
+    CHECK_TRUE(layout.PowerupX(2) + 37.5f * layout.PowerupScale() < layout.width / 2);
+    CHECK_TRUE(layout.powerup_score_z - 8 > layout.rail_bottom);
+    const auto continue_only = layout.Footer(0, 1);
+    const auto left = layout.Footer(0, 2), right = layout.Footer(1, 2);
+    Close(continue_only.x, 0);
+    CHECK_TRUE(left.x + left.width / 2 < right.x - right.width / 2);
+    CHECK_TRUE(right.z + right.height / 2 < layout.rail_bottom);
+    const PortraitViewport viewport{aspect * 1000, 1000, 8, 64, aspect * 1000 - 8, 906};
+    const auto fit = FitPortraitViewport(aspect, viewport,
+        PortraitContentBounds{layout.width / 2, layout.top, layout.bottom});
+    CHECK_TRUE(fit.X(-layout.width / 2) > (8 - viewport.width / 2) * .48f);
+    CHECK_TRUE(fit.X(layout.width / 2) < viewport.width / 2 * .48f);
+    CHECK_TRUE(fit.Z(layout.top) < (500 - viewport.safe_y) * .48f);
+    CHECK_TRUE(fit.Z(right.z - right.height / 2) >
+               (500 - viewport.safe_y - viewport.safe_height) * .48f);
+  }
   BeginCase("library transitions retain portrait for both native panel layouts");
   for (const auto source : kPortraitLibraryScreens) {
     CHECK_TRUE(PortraitLibraryScreen(source));

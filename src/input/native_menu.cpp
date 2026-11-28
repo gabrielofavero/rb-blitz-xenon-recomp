@@ -71,6 +71,7 @@ REX_EXTERN(sub_824E3008);       // UIListState::Selected (logical index)
 REX_EXTERN(sub_824C0C08);       // UIList::NumData (dispatches to the current provider)
 REX_EXTERN(sub_82402DE8);       // ObjectDir::FindObject
 REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
+REX_EXTERN(sub_821F0300);       // RndTransformable::SetWorldDirty
 REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
 REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
 REX_EXTERN(sub_824BAF98);       // UILabel::Update (text rectangle and style layout)
@@ -124,6 +125,8 @@ uint64_t screen_generation = 0;
 std::string current_screen_name;
 thread_local std::string_view drawing_panel_screen;
 thread_local MenuPoint drawing_panel_translation;
+enum class ResultsPanel { kNone, kShared, kBreakdown };
+thread_local ResultsPanel drawing_results_panel = ResultsPanel::kNone;
 std::string_view DrawScreenName() {
   return drawing_panel_screen.empty() ? std::string_view(current_screen_name) : drawing_panel_screen;
 }
@@ -372,7 +375,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   gameplay_resolution_active = GameplayResolutionScreen(name, panel_name, focus_name);
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene) &&
       (!ui::PortraitStoreScreen(name) || ui::screen::CurrentMenuConfiguration().rhythmverse_row);
-  portrait_panel_state.Publish(ui::PortraitLibraryScreen(name) ? loaded_panel_dir : current_panel_dir,
+  portrait_panel_state.Publish((ui::PortraitLibraryScreen(name) || ui::PortraitResultsBreakdown(name))
+                                   ? loaded_panel_dir : current_panel_dir,
                                portrait_splash_active, name);
   current_panel_name = panel_name;
   // The store modal focuses the panel without a UIComponent. Its action
@@ -1225,6 +1229,7 @@ uint32_t SceneObject(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* n
 
 bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner) {
   if (!settings::InterfacePortraitEnabled()) return false;
+  if (drawing_results_panel == ResultsPanel::kShared) return owner != 0;
   if (!drawing_panel_screen.empty())
     UpdatePortraitPanelTranslation(ctx, base, owner + 4 + U32(base, U32(base, owner + 4) + 16));
   const auto header = ObjectBase(base, owner);
@@ -1249,6 +1254,8 @@ ui::PortraitCalibrationAction PortraitFooterSlot(PPCContext& ctx, uint8_t* base,
 
 ui::PortraitCalibrationAction PortraitMenuHintSlot(PPCContext& ctx, uint8_t* base, uint32_t owner,
                                                   size_t index, size_t count) {
+  if (drawing_results_panel == ResultsPanel::kShared)
+    return ui::PortraitResults(ui::screen::CurrentMenuConfiguration().portrait_aspect).Footer(index, count);
   const auto header = ObjectBase(base, owner);
   return PortraitFooterSlot(ctx, base, header ? U32(base, header + 36) : 0, index, count);
 }
@@ -1652,35 +1659,23 @@ void DrawListLabel(PPCContext& ctx, uint8_t* base) {
   __imp__sub_824E9A90(ctx, base);
 }
 
-std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+std::optional<MenuBounds> ProjectMenuBox(PPCContext& ctx, uint8_t* base,
+                                         float x, float y, float z, float width, float height,
+                                         uint32_t transform = 0) {
   const auto camera = U32(base, 0x8284A108);
-  if (!camera) return {};
-  const float x = F32(base, label + 144), z = F32(base, label + 148);
-  const float width = F32(base, label + 152), height = F32(base, label + 156);
-  if (!(width > 0) || height == 0) return {};
+  if (!camera || !(width > 0) || height == 0) return {};
   GuestCall call(ctx, base); auto& c = call.ctx;
-  c.r3.u32 = label; c.r4.u32 = 0;
-  sub_824BA9F8(c, base);
-  // DrawShowing skips fully transparent label styles; those are not hit targets.
-  if (!(F32(base, c.r3.u32 + 36) > 0)) return {};
-  // Resolve the same virtual RndTransformable base used by UIListLabelElement::Draw.
-  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
-  const auto transform = WorldTransformForDraw(transformable,
-      [base](uint32_t address) { return base[address]; },
-      [&](uint32_t object) {
-        c.r3.u32 = object;
-        sub_821F13D0(c, base);
-        return c.r3.u32;
-      });
   const auto local = call.scratch, world = local + 16, projected = local + 32;
   MenuBounds bounds{INFINITY, INFINITY, -INFINITY, -INFINITY};
   for (unsigned corner = 0; corner < 4; ++corner) {
     Float(base, local, x + (corner & 1 ? width : 0));
-    Float(base, local + 4, 0);
+    Float(base, local + 4, y);
     Float(base, local + 8, z + (corner & 2 ? height : 0));
-    c.r3.u32 = local; c.r4.u32 = transform; c.r5.u32 = world;
-    sub_821E14A8(c, base);
-    c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
+    if (transform) {
+      c.r3.u32 = local; c.r4.u32 = transform; c.r5.u32 = world;
+      sub_821E14A8(c, base);
+    }
+    c.r3.u32 = camera; c.r4.u32 = transform ? world : local; c.r5.u32 = projected;
     sub_821FF4A0(c, base);
     const float px = F32(base, projected), py = F32(base, projected + 4);
     if (!std::isfinite(px) || !std::isfinite(py)) return {};
@@ -1688,6 +1683,18 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
     bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
   }
   return bounds;
+}
+
+std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  const auto style = rex::ppc::Call<uint32_t>(ctx, base, sub_824BA9F8, label, uint32_t(0));
+  // DrawShowing skips fully transparent label styles.
+  if (!style || !(F32(base, style + 36) > 0)) return {};
+  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto transform = WorldTransformForDraw(transformable,
+      [base](uint32_t address) { return base[address]; },
+      [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
+  return ProjectMenuBox(ctx, base, F32(base, label + 144), 0, F32(base, label + 148),
+                        F32(base, label + 152), F32(base, label + 156), transform);
 }
 void DrawBlackMenuCaption(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t black_color) {
   const auto styles = U32(base, label + 180), styles_end = U32(base, label + 184);
@@ -1986,6 +1993,102 @@ bool DrawPortraitStoreDialogControl(PPCContext& ctx, uint8_t* base, uint32_t lab
   return true;
 }
 
+bool DrawPortraitResultsLabel(PPCContext& ctx, uint8_t* base, uint32_t label, std::string_view name) {
+  if (drawing_results_panel == ResultsPanel::kNone) return false;
+  const auto layout = ui::PortraitResults(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+  float x = 0, z = 0, width = layout.width - 16, height = 0;
+  // The ink anchor is the left edge, center, or right edge of the rendered text.
+  float anchor = .5f;
+  std::optional<ui::PortraitCalibrationAction> action_slot;
+  uint16_t button = 0;
+  if (drawing_results_panel == ResultsPanel::kShared) {
+    if (drawing_footer && drawing_footer->entries.size() == 1 &&
+        drawing_footer->entries.front().label == label) {
+      action_slot = layout.Footer(drawing_footer->index, drawing_footer->count);
+      x = action_slot->x; z = action_slot->z;
+      width = action_slot->width - 8; height = 14;
+      button = MenuHintButton(drawing_footer->entries.front().action);
+    } else if (name == "song_title.lbl") {
+      z = layout.title_z; height = 46;
+    } else if (name == "song_score.lbl") {
+      z = layout.score_z; height = 34;
+    } else if (name == "challenge_title.lbl") {
+      z = 214; height = 14;
+    }
+  } else {
+    constexpr std::array rows{"base", "blitz", "solo", "finale"};
+    for (size_t i = 0; i < rows.size(); ++i) {
+      const std::string_view prefix = rows[i];
+      if (!name.starts_with(prefix)) continue;
+      const auto suffix = name.substr(prefix.size());
+      if (suffix != "_label.lbl" && suffix != "_value.lbl") continue;
+      const bool value = suffix == "_value.lbl";
+      x = (layout.width / 2 - 10) * (value ? 1 : -1);
+      z = layout.RowZ(i);
+      width = layout.width * (value ? .39f : .55f) - 10;
+      height = 15;
+      anchor = value ? 1 : 0;
+      break;
+    }
+    if (name.starts_with("powerup") && name.size() > 8 && name[7] >= '1' && name[7] <= '3') {
+      const auto suffix = name.substr(8);
+      if (suffix == "_label.lbl" || suffix == "_value.lbl") {
+        const bool value = suffix == "_value.lbl";
+        x = layout.PowerupX(size_t(name[7] - '1'));
+        z = value ? layout.powerup_score_z : layout.powerup_name_z;
+        width = layout.width / 3 - 8;
+        height = value ? 15 : 18;
+      }
+    }
+  }
+  if (!height) return false;
+
+  if (base[label + 178])
+    rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
+  const auto ink = InlineHelpGlyphBounds(label,
+      [base](uint32_t at) { return U32(base, at); },
+      [base](uint32_t at) { return F32(base, at); });
+  const float rect_height = F32(base, label + 156);
+  const float left = ink ? (*ink)[0] : F32(base, label + 144);
+  const float bottom = ink ? (*ink)[1] : F32(base, label + 148) + std::min(0.f, rect_height);
+  const float ink_width = ink ? (*ink)[2] - left : F32(base, label + 152);
+  const float ink_height = ink ? (*ink)[3] - bottom : std::abs(rect_height);
+  if (!(ink_width > 0 && ink_height > 0)) return false;
+
+  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto world = WorldTransformForDraw(transformable,
+      [base](uint32_t at) { return base[at]; },
+      [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
+  std::array<uint8_t, 64> prior;
+  std::memcpy(prior.data(), base + world, prior.size());
+  rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
+  const auto fit = hooks::PortraitDrawFit();
+  const float scale = std::min({1.5f, width * fit.scale / std::max(1.f, std::abs(F32(base, world)) * ink_width),
+                                height * fit.scale / std::max(1.f, std::abs(F32(base, world + 40)) * ink_height)});
+  for (uint32_t row = 0; row < 3; ++row)
+    for (uint32_t column = 0; column < 3; ++column) {
+      const auto address = world + row * 16 + column * 4;
+      Float(base, address, F32(base, address) * scale);
+    }
+  const auto position = PortraitDrawPoint(x, z);
+  const float ink_x = left + anchor * ink_width;
+  const float ink_z = bottom + ink_height / 2;
+  Float(base, world + 48, position.x - F32(base, world) * ink_x - F32(base, world + 32) * ink_z);
+  Float(base, world + 56, position.y - F32(base, world + 8) * ink_x - F32(base, world + 40) * ink_z);
+  if (action_slot && button && menu_available && !current_input_scope) {
+    const auto style = rex::ppc::Call<uint32_t>(ctx, base, sub_824BA9F8, label, uint32_t(0));
+    if (style && F32(base, style + 36) > 0) {
+      const float half_width = action_slot->width * fit.scale / 2;
+      const float half_height = action_slot->height * fit.scale / 2;
+      if (const auto bounds = ProjectMenuBox(ctx, base, position.x - half_width, F32(base, world + 52),
+              position.y - half_height, 2 * half_width, 2 * half_height))
+        CaptureHintTarget(*bounds, button);
+    }
+  }
+  __imp__sub_824BC668(ctx, base);
+  return true;
+}
+
 void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const auto name = ObjectName(base, ObjectBase(base, label));
   // The stock marquee slides its own labels while the portrait panels draw
@@ -1997,6 +2100,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const bool portrait = settings::InterfacePortraitEnabled();
   const bool settings_title = name == "header.lbl" && SettingsMenuPanel();
   if (!settings_title) RestoreMenuGlyphUpload(ctx, base, label, false);
+  if (DrawPortraitResultsLabel(ctx, base, label, name)) return;
   if (DrawPortraitStoreDialogControl(ctx, base, label, name)) return;
   if (DrawPortraitReadingText(ctx, base, label, name)) return;
   if (drawing && drawing->store_rows && drawing->row && !drawing->suppress &&
@@ -2277,7 +2381,7 @@ void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
 }
 void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action,
                      uint32_t owner) {
-  if (!menu_available) return;
+  if (!menu_available || drawing_results_panel == ResultsPanel::kShared) return;
   const auto header = ObjectBase(base, owner);
   if (dialog_scope == MenuDialogScope::kShortcuts && ObjectName(base, header) != "pop_up_help.ihp") return;
   if (dialog_scope == MenuDialogScope::kPanel &&
@@ -2649,6 +2753,15 @@ std::optional<ui::PortraitFit> PortraitPanelDrawFit(uint8_t* base, uint32_t draw
   if (!panel.active) return {};
   const auto object = ObjectBase(base, drawable);
   const auto name = ObjectName(base, object);
+  const float aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+  const auto viewport = ui::CurrentPortraitViewport();
+  const float canvas_aspect = ui::PortraitSplash(aspect).width / 480;
+  if (ui::PortraitResultsBreakdown(panel.screen) &&
+      (name == "SharedResults" || (panel.directory && object == ObjectBase(base, panel.directory)))) {
+    const auto layout = ui::PortraitResults(aspect);
+    return ui::FitPortraitViewport(canvas_aspect, viewport,
+        ui::PortraitContentBounds{layout.width / 2, layout.top, layout.bottom});
+  }
   const bool store_panel = ui::screen::CurrentMenuConfiguration().rhythmverse_row &&
       ui::PortraitStoreScreen(panel.screen) &&
       (name == "StoreMainPanel" || name == "StoreMenuPanel" || name == "songselect" || name == "storedetails" || name == "error_general");
@@ -2656,10 +2769,7 @@ std::optional<ui::PortraitFit> PortraitPanelDrawFit(uint8_t* base, uint32_t draw
       !ui::PortraitLibraryPanelScreen(name).empty();
   if (!store_panel && !transition_panel &&
       (!panel.directory || object != ObjectBase(base, panel.directory))) return {};
-  const float aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
   const bool library_panel = transition_panel || store_panel || ui::PortraitLibraryScreen(panel.screen);
-  const auto viewport = ui::CurrentPortraitViewport();
-  const float canvas_aspect = ui::PortraitSplash(aspect).width / 480;
   constexpr float border = 2;  // Includes the row and footer mesh rims.
   const float top = panel.screen == "store_info_screen" ? ui::PortraitStoreOfferLayout::top :
                                                           ui::kPortraitLibraryContentTop;
@@ -2678,11 +2788,110 @@ std::optional<ui::PortraitFit> PortraitPanelDrawFit(uint8_t* base, uint32_t draw
   return fit;
 }
 
+static void DrawPortraitResultsPanel(PPCContext& ctx, uint8_t* base, uint32_t dir,
+                                     void (*draw)(PPCContext&, uint8_t*)) {
+  const auto layout = ui::PortraitResults(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+  const auto fit = hooks::PortraitDrawFit();
+  drawing_panel_translation = {};
+  // Use the native local transforms for this draw only. The same header and
+  // frame are reused by the other results pages, and Flow owns their animation.
+  struct SavedTransform { uint32_t object; std::array<uint8_t, 64> local; };
+  std::array<SavedTransform, 9> saved;
+  size_t changed = 0;
+  rex::ScopeGuard restore([&] {
+    while (changed) {
+      const auto& entry = saved[--changed];
+      std::memcpy(base + entry.object + 8, entry.local.data(), entry.local.size());
+      rex::ppc::Call<void>(ctx, base, sub_821F0300, entry.object);
+    }
+  });
+  const auto place = [&](uint32_t transform, float x, float z, float sx, float sz) {
+    if (!transform) return;
+    auto& entry = saved[changed++];
+    entry.object = transform;
+    auto* local = base + transform + 8;
+    std::memcpy(entry.local.data(), local, entry.local.size());
+    for (uint32_t row = 0; row < 3; ++row) {
+      const auto address = transform + 8 + row * 16;
+      Float(base, address, F32(base, address) * sx);
+      Float(base, address + 8, F32(base, address + 8) * sz);
+    }
+    Float(base, transform + 56, x);
+    Float(base, transform + 64, z);
+    rex::ppc::Call<void>(ctx, base, sub_821F0300, transform);
+  };
+  const auto group = [&](const char* name) {
+    const auto object = SceneObject(ctx, base, dir, name);
+    // ObjectDir returns Hmx::Object. RndGroup's transformable view is at -0x108.
+    if (!object || U32(base, object) != 0x82024C4C) return uint32_t(0);
+    return object - 0x108;
+  };
+  const auto mesh_transform = [&](const char* name) {
+    const auto mesh = SceneMesh(ctx, base, dir, name);
+    return mesh ? mesh + 64 : 0;
+  };
+  if (drawing_results_panel == ResultsPanel::kShared) {
+    const auto song = group("SongText.grp");
+    const auto stars = group("Stars.grp");
+    if (song && stars)
+      place(stars, 0, layout.stars_z - F32(base, song + 64), layout.StarsScale(), layout.StarsScale());
+    // The retail frame is 545 x 203 mesh units. The lamp strips are 1024
+    // units wide, and use opposite orientations on the lower edge.
+    if (const auto frame = mesh_transform("neon_panel.mesh")) {
+      const float height = layout.rail_top - layout.rail_bottom;
+      place(frame, 0, (layout.rail_top + layout.rail_bottom) / 2,
+            layout.width / (545 * std::abs(F32(base, frame + 8))),
+            height / (203 * std::abs(F32(base, frame + 40))));
+    }
+    for (const auto& [name, z] : {std::pair{"dots_glass_top.mesh", layout.rail_top},
+                                {"dots_lights_top.mesh", layout.rail_top},
+                                {"dots_glass_bottom.mesh", layout.rail_bottom},
+                                {"dots_lights_bottom.mesh", layout.rail_bottom}}) {
+      if (const auto rail = mesh_transform(name)) {
+        const float ratio = (layout.width - 5) / (1024 * std::abs(F32(base, rail + 8)));
+        place(rail, 0, z, ratio, ratio);
+      }
+    }
+  } else if (const auto all = group("all.grp")) {
+    // Parent.trans carries the native entrance/exit motion. Its settled
+    // translation is +50 Z in transition.anim.
+    const float settled_z = F32(base, all + 64) + 50;
+    const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, all);
+    drawing_panel_translation = {F32(base, world + 48) - fit.X(0),
+                                 F32(base, world + 56) - fit.Z(settled_z)};
+    constexpr std::array names{"pup1.grp", "pup2.grp", "pup3.grp"};
+    for (size_t i = 0; i < names.size(); ++i)
+      place(group(names[i]), layout.PowerupX(i), layout.powerup_icon_z - settled_z,
+            layout.PowerupScale(), layout.PowerupScale());
+  }
+  draw(ctx, base);
+}
+
 void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
                        void (*draw)(PPCContext&, uint8_t*)) {
   const auto previous = drawing_panel_screen;
   const auto previous_translation = drawing_panel_translation;
+  const auto previous_results = drawing_results_panel;
   const auto panel = portrait_panel_state.Snapshot();
+  rex::ScopeGuard restore([&] {
+    drawing_panel_screen = previous;
+    drawing_panel_translation = previous_translation;
+    drawing_results_panel = previous_results;
+  });
+  if (ui::PortraitResultsBreakdown(panel.screen)) {
+    const auto dir = PanelDirectoryFromDrawable(drawable,
+        [base](uint32_t address) { return U32(base, address); });
+    if (dir) {
+      const auto object = ObjectBase(base, dir);
+      if (ObjectName(base, object) == "SharedResults") drawing_results_panel = ResultsPanel::kShared;
+      else if (panel.directory && object == ObjectBase(base, panel.directory))
+        drawing_results_panel = ResultsPanel::kBreakdown;
+      if (drawing_results_panel != ResultsPanel::kNone) {
+        DrawPortraitResultsPanel(ctx, base, dir, draw);
+        return;
+      }
+    }
+  }
   if (settings::InterfacePortraitEnabled() && ui::PortraitLibraryTransition(panel.screen)) {
     const auto dir = PanelDirectoryFromDrawable(drawable,
         [base](uint32_t address) { return U32(base, address); });
@@ -2692,10 +2901,6 @@ void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
         name == "songselect" && !SceneObject(ctx, base, dir, "portrait_tab_songs.lbl"));
     drawing_panel_translation = {};
   }
-  rex::ScopeGuard restore([&] {
-    drawing_panel_screen = previous;
-    drawing_panel_translation = previous_translation;
-  });
   draw(ctx, base);
 }
 
@@ -2724,6 +2929,7 @@ REX_HOOK_RAW(sub_824B2958) {
 }
 REX_HOOK_RAW(sub_824DC1E8) {
   const auto slider = ctx.r3.u32 - 204;
+  rb_blitz::hooks::PrepareHudSlider(ctx, base, slider);
   __imp__sub_824DC1E8(ctx, base);
   rb_blitz::input::CaptureSlider(ctx, base, slider);
 }
@@ -2785,6 +2991,7 @@ REX_HOOK_RAW(sub_824E9A90) {
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
+  if (rb_blitz::hooks::HidePortraitHudLabel(base, label)) return;
   rb_blitz::input::UpdateTouchPrompt(ctx, base, label);
   rb_blitz::input::PublishPortraitDialogLabel(base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);

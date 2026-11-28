@@ -17,9 +17,9 @@ Layout MakeLayout(float width, float height, Rect safe) {
   if (safe.width <= 0 || safe.height <= 0) safe = {0, 0, width, height};
   const float margin = std::min(12.0f, height * .025f);
   // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
-  // Match the score's gap above the resting Blitz meter below it.
+  // Leave a gap below the resting Blitz meter in portrait.
   const bool portrait = width < height;
-  const float top = safe.y + margin + (portrait ? height * (76.f / 480.f) : 0.f);
+  const float top = safe.y + margin + (portrait ? height * (56.f / 480.f) : 0.f);
   const float preferred_side = portrait ? 44.f : std::max(height * .1125f, 44.f);
   const float side = std::max(0.f, std::min({preferred_side,
       safe.width - margin * 2, safe.y + safe.height - top - margin}));

@@ -1617,13 +1617,15 @@ an iOS device check. A native song-selection run also confirmed that loading
 fills the portrait surface and keeps the tip, power-ups and Begin prompt separate.
 
 HUD positions use the visible crop bounds independently of the source frame.
-The score sits above the pause button, level with the animated star row.
+The score and animated star row use a compact size beside a visible song
+progress bar and return to their normal portrait size when it is hidden.
 The first star stays at the right edge and additional stars fill in to its left.
-The multiplier ladder is inset from the left to fit
-instrument badges that share a rung. The personal-best comparator sits at
-centre right, and collected letters sit above the ladder and comparator. The
-song progress bar keeps its vertical orientation below the stars at a 0.35
-scale.
+The multiplier ladder sits just inside the left edge, including its backing
+and stacked instrument badges. The personal-best comparator sits at the right
+edge with its markers and the You label visible. Collected letters sit above
+the ladder and comparator. The song progress bar runs horizontally at the top
+center, just below the safe-area edge. A uniform scale keeps its native
+proportions. The Blitz meter and pause button sit below this row.
 The transient personal-best message is right-aligned above the comparator.
 The streak uses a 1.2 scale below the multiplier ladder. The timer uses the
 same scale and sits centered just above the bottom safe area. Label draw
@@ -1632,8 +1634,7 @@ caches, while scaling inherited named anchors only once. Landscape authored
 positions are unchanged. The hidden keys of the personal-best animation remain
 offscreen during normal play.
 
-The portrait pause button uses a 44-point square below the Blitz meter.
-Its gap below the resting meter matches the score's gap above it.
+The portrait pause button uses a 44-point square with clearance below the resting Blitz meter.
 The guest draws it at the same location used for hit testing.
 The power-up target follows the native lane icon. Achievement toasts are
 centred at the bottom of portrait surfaces (SDK patch 0084).

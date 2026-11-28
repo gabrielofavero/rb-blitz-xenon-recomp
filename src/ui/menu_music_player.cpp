@@ -276,8 +276,7 @@ class Player final : public rex::ui::DialogBase {
     const float s = layout.scale;
     const float expansion = pointer.expansion();
     const auto panel = layout.Panel(expansion);
-    const auto handle = layout.Handle(expansion);
-    const float center = (handle.left + handle.right) * .5f;
+    const float center = (layout.content.left + layout.content.right) * .5f;
     if (expansion > 0)
       draw->AddRectFilled({0, 0}, {panel.right, panel.top},
                           Fade(IM_COL32(0, 0, 0, 165), expansion));
@@ -316,7 +315,7 @@ class Player final : public rex::ui::DialogBase {
       const float left = layout.content.left, right = layout.content.right;
       const float width = right - left;
       const float art_size = layout.expanded_cover_size;
-      const float art_top = panel.top + 48 * s;
+      const float art_top = layout.Header(expansion).bottom;
       const MenuBounds cover{center - art_size * .5f, art_top, center + art_size * .5f, art_top + art_size};
       constexpr char kNowPlaying[] = "Now playing";
       const float heading_width = heading->CalcTextSizeA(15 * s, FLT_MAX, 0, kNowPlaying).x;

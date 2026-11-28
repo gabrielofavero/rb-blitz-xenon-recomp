@@ -407,6 +407,33 @@ inline bool PortraitLibraryBackgroundTitle(std::string_view name) {
       name == "main_inbox.lbl" || name == "main_new_msg.lbl" || name == "offline_Mysongs.lbl";
 }
 
+inline bool PortraitResultsBreakdown(std::string_view screen) {
+  return screen == "results_breakdown_screen";
+}
+
+struct PortraitResultsLayout {
+  float width;
+  static constexpr float top = 226, bottom = -219;
+  static constexpr float title_z = 180, score_z = 119, stars_z = 71;
+  static constexpr float rail_top = 43, rail_bottom = -172;
+  static constexpr float powerup_icon_z = -94, powerup_name_z = -132, powerup_score_z = -153;
+  static constexpr float footer_z = -199, footer_height = 36, footer_gap = 6;
+
+  float PowerupX(size_t index) const { return (float(index) - 1) * width / 3; }
+  float PowerupScale() const { return std::min(.72f, (width / 3 - 8) / 75); }
+  float StarsScale() const { return std::min(.88f, (width - 8) / 280); }
+  float RowZ(size_t index) const { return 24 - 26 * float(index); }
+  PortraitCalibrationAction Footer(size_t index, size_t count) const {
+    const float cell = (width - footer_gap * float(count - 1)) / float(count);
+    return {(float(index) - float(count - 1) / 2) * (cell + footer_gap),
+            footer_z, cell, footer_height};
+  }
+};
+
+inline PortraitResultsLayout PortraitResults(float aspect) {
+  return {std::min(PortraitLibraryWidth(aspect), 320.f)};
+}
+
 inline std::string_view PortraitLibraryPanelScreen(std::string_view panel, bool store_browser = false) {
   if (panel == "songselect") return store_browser ? "store_browser_screen" : "song_select_screen";
   if (panel == "StoreMainPanel" || panel == "StoreMenuPanel") return "store_menu_screen";
@@ -420,7 +447,7 @@ inline std::string_view PortraitLibraryPanelScreen(std::string_view panel, bool 
 // prompts. Other menus keep their existing fitted presentation.
 inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel,
                                 std::string_view scene = {}) {
-  return PortraitStoreScreen(screen) || PortraitLibraryTransition(screen) ||
+  return PortraitStoreScreen(screen) || PortraitLibraryTransition(screen) || PortraitResultsBreakdown(screen) ||
          (screen == "splash_screen" && panel == "splash_panel") ||
          (screen == "autosave_warning_screen" && panel == "autosave_warning_panel") ||
          (screen == "server_connect_screen" && panel == "server_connect_panel") ||

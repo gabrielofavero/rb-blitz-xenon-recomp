@@ -6,29 +6,54 @@
 
 #include <algorithm>
 #include <atomic>
-#include <string>
-#include <vector>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
-#include <SDL3/SDL.h>
-#include <rex/logging/log_category.h>
-#include <rex/ui/style.h>
-#include <rex/ui/image_texture.h>
-#include "platform/image_decode.h"
-
+#include <string>
+#include <vector>
 #include <imgui.h>
+#include <SDL3/SDL.h>
+#include <rex/filesystem/xdbf.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/hook.h>
-#include <rex/xam/achievement_manager.h>
+#include <rex/ui/image_texture.h>
+#include <rex/ui/style.h>
 #include <rex/ui/ui_system.h>
+#include <rex/xam/achievement_manager.h>
 
 #include "input/native_menu.h"
 #include "input/title_input.h"
+#include "platform/image_decode.h"
 #include "settings/runtime_settings.h"
 
 namespace rb_blitz::ui::achievements {
 namespace {
 std::atomic<bool> active{false};
+
+constexpr size_t kMaxIconBytes = 4 * 1024 * 1024;
+
+std::unique_ptr<rex::ui::ImageTexture> DecodeIcon(const uint8_t* bytes, size_t size) {
+  if (!bytes || size == 0 || size > kMaxIconBytes) return nullptr;
+  std::vector<uint8_t> rgba;
+  uint32_t width = 0, height = 0;
+  std::string error;
+  if (!platform::DecodeImageRgba(bytes, size, 512, &rgba, &width, &height, &error)) return nullptr;
+  auto texture = rex::ui::ImageTexture::Create(width, height, rgba);
+  return texture ? std::move(*texture) : nullptr;
+}
+
+std::unique_ptr<rex::ui::ImageTexture> LoadIconFile(const std::string& path) {
+  std::ifstream file(std::filesystem::path(std::u8string(path.begin(), path.end())),
+                     std::ios::binary | std::ios::ate);
+  const auto length = file.tellg();
+  if (length <= 0 || length > kMaxIconBytes) return nullptr;
+  std::vector<uint8_t> bytes(static_cast<size_t>(length));
+  file.seekg(0);
+  if (!file.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) return nullptr;
+  return DecodeIcon(bytes.data(), bytes.size());
+}
 
 uint32_t HeldCommands() {
   uint32_t held = 0;
@@ -55,8 +80,7 @@ uint32_t HeldCommands() {
 
 class Browser final : public rex::ui::DialogBase {
  public:
-  Browser(rex::ui::IUISystem& ui, std::function<rex::xam::IAchievementManager*()> manager)
-      : ui_(ui), manager_provider_(std::move(manager)) {
+  Browser(rex::ui::IUISystem& ui, rex::kernel::TitleRuntime& title) : ui_(ui), title_(title) {
     if (!SDL_AddEventWatch(Watch, this))
       REXLOG_ERROR("achievements: could not register touch events: {}", SDL_GetError());
   }
@@ -64,8 +88,7 @@ class Browser final : public rex::ui::DialogBase {
   ~Browser() override { SDL_RemoveEventWatch(Watch, this); active.store(false); }
 
   bool Draw(ImGuiIO& io) override {
-    manager_ = manager_provider_ ? manager_provider_() : nullptr;
-    if (!manager_) {
+    if (!title_.IsLoaded()) {
       active.store(false);
       entries_.clear();
       icons_.clear();
@@ -82,9 +105,11 @@ class Browser final : public rex::ui::DialogBase {
       return true;
     }
     if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) { ResetScroll(); return true; }
+    auto& manager = title_.GetAchievementManager();
     const bool appearing = !opened_;
     if (appearing) {
-      entries_ = manager_->ListAchievements();
+      entries_ = manager.ListAchievements();
+      LoadIcons();
       navigation_.Reset();
       ImGui::OpenPopup("##blitz_achievements");
       opened_ = true;
@@ -105,6 +130,7 @@ class Browser final : public rex::ui::DialogBase {
     ImGui::PushStyleColor(ImGuiCol_Text, rex::ui::ToImVec4(theme.text));
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(.025f, .015f, .02f, .97f));
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, .55f));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(.16f, .16f, .16f, 1));
     ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, theme.border);
     ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, ImVec4(.30f, .30f, .30f, 1));
     ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, ImVec4(.24f, .24f, .24f, 1));
@@ -137,7 +163,7 @@ class Browser final : public rex::ui::DialogBase {
       int unlocked_count = 0, earned_score = 0, total_score = 0;
       for (const auto& entry : entries_) {
         total_score += entry.gamerscore;
-        if (manager_->IsUnlocked(entry.id)) {
+        if (manager.IsUnlocked(entry.id)) {
           ++unlocked_count;
           earned_score += entry.gamerscore;
         }
@@ -210,7 +236,7 @@ class Browser final : public rex::ui::DialogBase {
         ImGui::PopFont();
         ImFont* body = ImGui::GetFont();
         const auto description = [&](const rex::Achievement& entry) -> const std::string& {
-          return !manager_->IsUnlocked(entry.id) && !entry.unachieved_description.empty()
+          return !manager.IsUnlocked(entry.id) && !entry.unachieved_description.empty()
                      ? entry.unachieved_description : entry.description;
         };
         for (int row = 0; row < static_cast<int>(entries_.size()); row += layout.columns) {
@@ -225,7 +251,7 @@ class Browser final : public rex::ui::DialogBase {
           for (int i = row; i < std::min(row + layout.columns, int(entries_.size())); ++i) {
             if (i != row) ImGui::SameLine(0, gap);
             const auto& entry = entries_[i];
-            const bool unlocked = manager_->IsUnlocked(entry.id);
+            const bool unlocked = manager.IsUnlocked(entry.id);
             const ImVec2 card = ImGui::GetCursorScreenPos();
             ImGui::PushID(static_cast<int>(entry.id));
             ImGui::InvisibleButton("##card", ImVec2(card_width, row_height));
@@ -244,8 +270,8 @@ class Browser final : public rex::ui::DialogBase {
                 ? theme.border_highlight : ImVec4(.40f, .16f, .18f, .9f)), 5 * scale,
                 0, (selected ? 2 : 1) * scale);
             const ImVec2 image(card.x + inset, card.y + inset);
-            if (auto* texture = GetIcon(entry)) {
-              cards->AddImage(texture->GetTexture(), image,
+            if (const auto icon = icons_.find(entry.id); icon != icons_.end()) {
+              cards->AddImage(icon->second->GetTexture(), image,
                   ImVec2(image.x + icon_size, image.y + icon_size), ImVec2(0, 0), ImVec2(1, 1),
                   ImGui::GetColorU32(unlocked ? ImVec4(1, 1, 1, 1) : ImVec4(.65f, .65f, .65f, 1)));
             } else {
@@ -291,7 +317,7 @@ class Browser final : public rex::ui::DialogBase {
       }
       ImGui::EndPopup();
     } else ResetScroll();
-    ImGui::PopStyleColor(10);
+    ImGui::PopStyleColor(11);
     ImGui::PopStyleVar(5);
     return true;
 }
@@ -360,34 +386,21 @@ class Browser final : public rex::ui::DialogBase {
     self.scroll_.Observe(device, finger, phase, x, y, double(timestamp) * 1e-9);
     return true;
   }
-  rex::ui::ImageTexture* GetIcon(const rex::Achievement& entry) {
-    if (entry.icon_path.empty()) return nullptr;
-    if (auto found = icons_.find(entry.icon_path); found != icons_.end()) return found->second.get();
-    std::unique_ptr<rex::ui::ImageTexture> image;
-    std::ifstream file(std::filesystem::path(std::u8string(entry.icon_path.begin(), entry.icon_path.end())), std::ios::binary | std::ios::ate);
-    if (file) {
-      const auto length = file.tellg();
-      if (length > 0 && length <= 4 * 1024 * 1024) {
-        std::vector<uint8_t> bytes(static_cast<size_t>(length));
-        file.seekg(0);
-        if (file.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) {
-          std::vector<uint8_t> rgba;
-          uint32_t width = 0, height = 0;
-          std::string error;
-          if (platform::DecodeImageRgba(bytes.data(), bytes.size(), 512, &rgba, &width, &height, &error)) {
-            if (auto created = rex::ui::ImageTexture::Create(width, height, rgba)) image = std::move(*created);
-          }
-        }
+  void LoadIcons() {
+    const auto db = title_.GetTitleXDBF();
+    for (const auto& entry : entries_) {
+      if (icons_.contains(entry.id)) continue;
+      auto texture = entry.icon_path.empty() ? nullptr : LoadIconFile(entry.icon_path);
+      if (!texture && entry.image_id != 0 && db->IsValid()) {
+        const auto icon = db->GetEntry(rex::filesystem::XDBFSection::kImage, entry.image_id);
+        texture = DecodeIcon(icon.buffer, icon.size);
       }
+      if (texture) icons_.emplace(entry.id, std::move(texture));
     }
-    auto* result = image.get();
-    icons_.emplace(entry.icon_path, std::move(image));
-    return result;
   }
   rex::ui::IUISystem& ui_;
-  std::function<rex::xam::IAchievementManager*()> manager_provider_;
-  rex::xam::IAchievementManager* manager_ = nullptr;
-  std::map<std::string, std::unique_ptr<rex::ui::ImageTexture>> icons_;
+  rex::kernel::TitleRuntime& title_;
+  std::map<uint32_t, std::unique_ptr<rex::ui::ImageTexture>> icons_;
   std::vector<rex::Achievement> entries_;
   Navigation navigation_;
   std::mutex scroll_mutex_;
@@ -405,9 +418,8 @@ void Toggle() { active.store(!active.load()); }
 bool Active() { return active.load(); }
 
 std::unique_ptr<rex::ui::IDialog> CreateOverlay(
-    rex::ui::IUISystem& ui,
-    std::function<rex::xam::IAchievementManager*()> manager) {
-  return std::make_unique<Browser>(ui, std::move(manager));
+    rex::ui::IUISystem& ui, rex::kernel::TitleRuntime& title) {
+  return std::make_unique<Browser>(ui, title);
 }
 }  // namespace rb_blitz::ui::achievements
 

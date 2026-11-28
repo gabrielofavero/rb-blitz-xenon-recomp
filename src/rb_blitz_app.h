@@ -818,10 +818,7 @@ inline void RbBlitzApp::CreateRegularDialogs() {
   mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(GetUI());
   help_overlay_ = rb_blitz::ui::help::CreateOverlay();
   notification_overlay_ = rb_blitz::ui::notifications::CreateOverlay(GetUI());
-  achievement_browser_ = rb_blitz::ui::achievements::CreateOverlay(GetUI(), [this] {
-    auto& title = GetTitleRuntime();
-    return title.IsLoaded() ? &title.GetAchievementManager() : nullptr;
-  });
+  achievement_browser_ = rb_blitz::ui::achievements::CreateOverlay(GetUI(), GetTitleRuntime());
   music_player_ = rb_blitz::ui::music::CreatePlayer(GetUI());
   portrait_dialog_ = rb_blitz::ui::portrait_dialog::CreateOverlay(GetUI().GetStyle().toast);
   probe_overlay_ = rb_blitz::diag::CreateOverlayDialog([this] {

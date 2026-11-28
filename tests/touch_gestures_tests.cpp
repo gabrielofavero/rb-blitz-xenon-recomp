@@ -210,7 +210,7 @@ int main() {
   }
   const auto portrait_controls = MakeLayout(405, 720, {0, 24, 405, 662});
   CHECK_EQ(portrait_controls.pause.width, 44.f);
-  CHECK_EQ(portrait_controls.pause.y, 150.f);
+  CHECK_EQ(portrait_controls.pause.y, 120.f);
   const float px = (layout.pause.x + layout.pause.width / 2) / layout.width;
   const float py = (layout.pause.y + layout.pause.height / 2) / layout.height;
   g = Ready();
